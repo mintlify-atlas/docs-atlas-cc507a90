@@ -1,7 +1,7 @@
 ---
-title: "GET /api/v1/projects — List All Your Projects"
+title: "GET /api/v1/projects — List All Projects for a User"
 sidebarTitle: "List Projects"
-description: "Retrieve every project belonging to the authenticated user. Returns an array of project objects with full configuration metadata including domains and build settings."
+description: "Retrieve all projects owned by the authenticated user. Each object includes repository info, build configuration, deployment URL, and custom domain status."
 ---
 
 The List Projects endpoint returns all projects owned by the currently authenticated user. Each project record includes its repository reference, build configuration, deployment URL, and custom domain status. Use this endpoint to build dashboards, populate project selectors, or audit your deployment inventory.

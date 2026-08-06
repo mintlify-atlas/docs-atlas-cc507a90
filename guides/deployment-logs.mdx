@@ -1,7 +1,7 @@
 ---
-title: "View Real-Time Deployment Logs and Build Output"
+title: "View Real-Time Deployment Logs and Build Output Live"
 sidebarTitle: "Deployment Logs"
-description: "Stream live build output during a deployment and access persisted logs for completed or failed builds via the dashboard or API."
+description: "Stream live build output during a deployment and access persisted logs for completed or failed builds via the dashboard or the API."
 ---
 
 Every deployment on Deploy Your App produces a full build log that is streamed to the dashboard in real time and persisted to the database when the deployment completes. Logs are delivered via **Server-Sent Events (SSE)** backed by a Redis pub/sub channel keyed by `deploymentId`. The builder worker publishes log chunks to the channel as it progresses through each build stage, and the browser subscribes to the stream through the API, rendering each line as it arrives.
@@ -66,7 +66,7 @@ For **runtime** debugging after a successful deployment, use the server logs end
 GET /api/v1/projects/:id/server-logs
 ```
 
-This endpoint streams live stdout and stderr from the running Docker container using `docker logs -f --tail 100 <containerId>`. It also uses Redis pub/sub (channel `server-logs:{containerId}`) with a distributed lock (`active-logger:{containerId}`) to ensure only one process runs `docker logs` at a time, even if multiple browser tabs subscribe simultaneously.
+This endpoint streams live stdout and stderr from the running Docker container using `docker logs -f --tail 100 <containerId>`. It also uses Redis pub/sub (channel `server-logs:{containerId}`) with a distributed lock (`active-logger:{containerId}`) to ensure only one process runs `docker logs` at a time, even if multiple browser tabs subscribe simultaneously. The response uses the same SSE format as the deployment logs endpoint: each event has the shape `{ "text": "<log line>" }`.
 
 <Tip>
   If your application deployed successfully but is crashing or behaving unexpectedly at runtime, use the **Server Logs** tab on the project page rather than the deployment logs. Server logs show live container output — including application errors, uncaught exceptions, and framework startup messages — from the moment the container started.

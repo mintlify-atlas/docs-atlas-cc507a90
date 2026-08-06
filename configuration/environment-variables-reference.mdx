@@ -4,7 +4,7 @@ sidebarTitle: "Env Reference"
 description: "Complete reference of all required and optional environment variables for every Deploy Your App service, grouped by service for self-hosted deployments."
 ---
 
-Running Deploy Your App on your own infrastructure requires configuring environment variables across several independent services: the Next.js web app, the Express API server, the BullMQ builder, the worker, and the notification microservice. This page is the authoritative reference for every variable each service reads, with its type, default value, and purpose.
+Running Deploy Your App on your own infrastructure requires configuring environment variables across several independent services: the Next.js web app, the Express API server, the BullMQ builder, the worker, the reverse proxy, and the notification microservice. This page is the authoritative reference for every variable each service reads, with its type, default value, and purpose.
 
 ## Web App (`apps/web`)
 
@@ -56,6 +56,16 @@ The worker is a separate BullMQ consumer process. It shares the same Redis insta
 |----------|----------|---------|-------------|
 | `REDIS_HOST` | No | `localhost` | Hostname of the Redis instance |
 | `REDIS_PORT` | No | `6379` | Port of the Redis instance |
+
+## Proxy (`apps/proxy`)
+
+The reverse proxy routes incoming requests to the correct deployed container or Cloudflare R2 static asset bucket, using subdomain and custom-domain mappings.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `R2_PUBLIC_URL` | ✅ Yes | — | Public base URL of the Cloudflare R2 bucket used to serve static site assets. Example: `https://pub-xxxx.r2.dev` |
+| `BASE_DOMAIN` | ✅ Yes | — | Base domain the proxy listens on for subdomain routing. Example: `yourdomain.com` |
+| `PORT` | No | `8080` | Port the proxy server listens on |
 
 ## Notification Service (`apps/nortification`)
 

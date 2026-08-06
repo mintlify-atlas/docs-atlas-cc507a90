@@ -18,7 +18,7 @@ Importing a project is the starting point for every deployment on Deploy Your Ap
   </Step>
 
   <Step title="Browse and select a repository">
-    The dashboard fetches your repositories from `GET /api/v1/repository` using paginated requests (30 repos per page). Use the search bar to filter by repository name or full name (e.g. `owner/repo`). Click the **Import** button next to the repository you want to deploy.
+    The dashboard fetches your repositories from `GET /api/v1/repository` using paginated requests (10 repos per page). Use the search bar to filter by repository name or full name (e.g. `owner/repo`). Click the **Import** button next to the repository you want to deploy.
 
     Once you select a repository, the configuration form appears on the right panel. The **Project Name** and **Production Branch** fields are pre-filled from the repository's metadata.
   </Step>
@@ -65,7 +65,7 @@ Importing a project is the starting point for every deployment on Deploy Your Ap
 
     1. **Validates the session** — checks that the request comes from an authenticated user with a linked GitHub account.
     2. **Creates project and deployment atomically** — runs a `prisma.$transaction` that creates both the `Project` record and an initial `Deployment` record in a single database transaction. Any environment variables are encrypted and stored as `Env` records linked to the project.
-    3. **Registers a GitHub webhook** — calls the GitHub API to create a webhook on the repository that fires on `push` events. The webhook payload is delivered to your platform's webhook endpoint and triggers automated deployments on every push.
+    3. **Registers a GitHub webhook** — calls the GitHub API via Octokit to create a webhook on the repository that fires on `push` events. The webhook delivers payloads to your platform's webhook endpoint (`/webhook/:projectId`) and triggers automated deployments on every push. If a webhook already exists for the repository, the registration step is skipped silently.
     4. **Enqueues the first build job** — adds a `deployment-event` job to the deployment queue, passing the project configuration, branch, environment variables, and deployment ID to the builder worker.
 
     <Note>

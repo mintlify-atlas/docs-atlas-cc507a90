@@ -1,5 +1,5 @@
 ---
-title: "Manage Environment Variables for Your Deployments"
+title: "Manage Environment Variables for Your Project Deployments"
 sidebarTitle: "Env Variables"
 description: "Add, update, and delete AES-256-GCM encrypted environment variables that are injected into your Docker build context at deploy time."
 ---
@@ -32,7 +32,7 @@ Send a `POST` request to `/api/v1/projects/:id/envs`. The endpoint **upserts by 
 ```bash
 curl -X POST https://your-domain.com/api/v1/projects/PROJECT_ID/envs \
   -H 'Content-Type: application/json' \
-  -b 'session=YOUR_SESSION_COOKIE' \
+  -b 'better-auth.session_token=YOUR_SESSION_TOKEN' \
   -d '{"key": "DATABASE_URL", "value": "postgres://user:pass@host:5432/db"}'
 ```
 
@@ -56,7 +56,7 @@ Send a `DELETE` request to `/api/v1/projects/:id/envs` with the `envId` query pa
 ```bash
 curl -X DELETE \
   "https://your-domain.com/api/v1/projects/PROJECT_ID/envs?envId=ENV_RECORD_ID" \
-  -b 'session=YOUR_SESSION_COOKIE'
+  -b 'better-auth.session_token=YOUR_SESSION_TOKEN'
 ```
 
 **Response**
@@ -86,8 +86,7 @@ On deployment, the worker calls `decrypt(value, MASTER_ENCRYPTION_KEY)` for each
 
 ## Security considerations
 
-- **Values are redacted from build logs.** The builder scans all log output for known env var values and replaces them with `[REDACTED]` before the logs are stored or streamed to the dashboard. This prevents accidental secret exposure in build output.
-- **Encrypted ciphertext is never sent to the browser.** The project API returns `Env` records including the `key` but the encrypted `value` is not included in dashboard responses.
+- **Encrypted ciphertext is never decrypted in the browser.** The project API returns `Env` records with the encrypted `value` field; the plaintext is only ever reconstructed inside the build worker, never in a browser response.
 - **Rotate `MASTER_ENCRYPTION_KEY` carefully.** If you change the key, any previously encrypted variables cannot be decrypted. Re-enter all variable values after a key rotation.
 - **`.env` file scope.** The `.env` file is written into the Docker build context only — it is not committed to your repository and is not included in the final image layer pushed to Cloudflare R2.
 

@@ -12,7 +12,7 @@ The full OAuth flow, from browser click to authenticated API access, proceeds as
 
 1. The user opens the web dashboard and clicks **Sign in with GitHub**.
 2. The browser is redirected to GitHub's authorization page, where the user grants the requested OAuth scopes (`read:user`, `user:email`, `repo`, `write:repo_hook`).
-3. GitHub redirects back to `{BETTER_AUTH_URL}/api/auth/callback/github` with a temporary authorization code.
+3. GitHub redirects back to `{NEXT_PUBLIC_APP_URL}/api/auth/callback/github` with a temporary authorization code.
 4. The `better-auth` library exchanges the code for an access token, creates a user session in PostgreSQL via Prisma, and sets an **HTTP-only session cookie** on the response.
 5. Every subsequent request to `/api/v1/` includes that cookie automatically, and the server validates it on each call via `auth.api.getSession()`.
 
@@ -62,7 +62,7 @@ curl -X POST https://your-domain.com/api/v1/projects/PROJECT_ID/deploy \
 
 ## Auth Session Endpoint
 
-You can verify your current session at any time by calling the `better-auth` session endpoint, which is proxied through the Next.js route handler:
+You can verify your current session at any time by calling the `better-auth` session endpoint, which is proxied through the Next.js route handler at `/api/auth/[...all]`:
 
 ```bash
 GET /api/auth/session

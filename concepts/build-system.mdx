@@ -1,7 +1,7 @@
 ---
 title: "How Deploy Your App Detects and Builds Your Project"
 sidebarTitle: "Build System"
-description: "Learn how Deploy Your App auto-detects your framework and package manager, selects the right Dockerfile template, and handles static vs. dynamic deployments."
+description: "Learn how Deploy Your App detects your framework and package manager, selects the right Dockerfile template, and handles static vs. dynamic deployments."
 ---
 
 Deploy Your App follows a zero-config philosophy: push your code and the platform figures out everything else. The builder service reads your repository, detects the framework and package manager from the files present in the project directory, selects the matching Dockerfile template from `infra/docker/`, injects any environment variables you have configured, and runs the build — all without requiring you to write a single pipeline file.
@@ -14,6 +14,7 @@ Detection is implemented in `apps/builder/src/utils/detect.ts`. The builder read
 |-----------|---------------|-----------------|
 | **Next.js** | `next` present in dependencies | `.next` |
 | **Vite** | `vite` present in dependencies | `dist` |
+| **CRA** | `react-scripts` present in dependencies | `build` |
 | **Node.js** | `express`, `fastify`, `koa`, `@nestjs/core`, `hono`, a `start` script, or an `index.js` file | _(none — server process)_ |
 | **Unknown / fallback** | None of the above match | `dist` |
 
@@ -35,7 +36,7 @@ If more than one lock file is detected the builder logs a warning and proceeds w
 
 ## Dockerfile Template Selection
 
-Each combination of framework and package manager maps to a pre-built Dockerfile template stored under `infra/docker/`:
+Each combination of framework and package manager maps to a pre-built Dockerfile template stored under `infra/docker/`. CRA and unknown project types share the `vite` template directory, since they all produce static output that is extracted and uploaded to R2.
 
 | Framework | Package manager | Template path |
 |-----------|----------------|--------------|
@@ -43,10 +44,10 @@ Each combination of framework and package manager maps to a pre-built Dockerfile
 | Next.js | npm | `infra/docker/nextjs/Dockerfile.npm` |
 | Next.js | pnpm | `infra/docker/nextjs/Dockerfile.pnpm` |
 | Next.js | yarn | `infra/docker/nextjs/Dockerfile.yarn` |
-| Vite | bun | `infra/docker/vite/Dockerfile.bun` |
-| Vite | npm | `infra/docker/vite/Dockerfile.npm` |
-| Vite | pnpm | `infra/docker/vite/Dockerfile.pnpm` |
-| Vite | yarn | `infra/docker/vite/Dockerfile.yarn` |
+| Vite / CRA / unknown | bun | `infra/docker/vite/Dockerfile.bun` |
+| Vite / CRA / unknown | npm | `infra/docker/vite/Dockerfile.npm` |
+| Vite / CRA / unknown | pnpm | `infra/docker/vite/Dockerfile.pnpm` |
+| Vite / CRA / unknown | yarn | `infra/docker/vite/Dockerfile.yarn` |
 | Node.js | bun | `infra/docker/nodejs/Dockerfile.bun` |
 | Node.js | npm | `infra/docker/nodejs/Dockerfile.npm` |
 | Node.js | pnpm | `infra/docker/nodejs/Dockerfile.pnpm` |
@@ -79,7 +80,7 @@ CMD sh -c "$START_COMMAND"
 
 The deployment strategy after the Docker image is built differs based on the detected project type.
 
-### Static (Vite)
+### Static (Vite / CRA / unknown)
 
 1. A temporary Docker container is created (not started) from the built image.
 2. The output directory (`/app/{rootDir}/dist` or the path specified in `outputDirectory`) is extracted via `docker cp`.

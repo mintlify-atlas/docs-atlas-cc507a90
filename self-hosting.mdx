@@ -79,6 +79,9 @@ Before you begin, make sure you have the following available on your server:
     #### Builder Service (`apps/builder/.env`)
 
     ```env
+    # PostgreSQL connection string — required by the Prisma client used in builder
+    DATABASE_URL="postgresql://postgres:postgres@localhost:5432/mydb"
+
     # Redis connection (matches docker-compose.yml defaults)
     REDIS_HOST="localhost"
     REDIS_PORT="6379"
@@ -110,6 +113,30 @@ Before you begin, make sure you have the following available on your server:
 
     DATABASE_URL="postgresql://postgres:postgres@localhost:5432/mydb"
 
+    REDIS_HOST="localhost"
+    REDIS_PORT="6379"
+    ```
+
+    #### Proxy Service (`apps/proxy/.env`)
+
+    ```env
+    # PostgreSQL connection string — required by the Prisma client used in the proxy
+    DATABASE_URL="postgresql://postgres:postgres@localhost:5432/mydb"
+
+    # Public base URL of your Cloudflare R2 bucket (used to serve static sites)
+    R2_PUBLIC_URL="https://pub-<hash>.r2.dev"
+
+    # Base domain for subdomain routing (must match builder BASE_DOMAIN)
+    BASE_DOMAIN="yourdomain.com"
+
+    # Port the proxy service binds to (PM2 uses 8000; Caddy forwards traffic here)
+    PORT="8000"
+    ```
+
+    #### Worker Service (`apps/worker/.env`)
+
+    ```env
+    # Redis connection — the worker reads from the BullMQ deployment queue
     REDIS_HOST="localhost"
     REDIS_PORT="6379"
     ```

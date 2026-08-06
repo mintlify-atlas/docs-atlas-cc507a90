@@ -1,7 +1,7 @@
 ---
-title: "DELETE /api/v1/projects/:id — Remove a Project"
+title: "DELETE /api/v1/projects/:id — Permanently Remove a Project"
 sidebarTitle: "Delete Project"
-description: "Permanently delete a project and all of its associated deployments and environment variables. This action cannot be undone."
+description: "Permanently delete a project and all its associated deployments and environment variables. Ownership is verified before deletion. Cannot be undone."
 ---
 
 The Delete Project endpoint permanently removes a project from the platform along with every record linked to it. Before deletion, the endpoint verifies that the project belongs to the authenticated user to prevent accidental or malicious removal of another user's data. Once the project is deleted, the operation cannot be reversed.

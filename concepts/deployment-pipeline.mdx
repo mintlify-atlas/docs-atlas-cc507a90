@@ -1,5 +1,5 @@
 ---
-title: "Deployment Pipeline Stages and Status Lifecycle"
+title: "Deployment Pipeline Stages and Status Lifecycle Guide"
 sidebarTitle: "Deployment Pipeline"
 description: "Understand every stage of the Deploy Your App pipeline from PENDING through SUCCESS, including the two-stage queue design and real-time log streaming."
 ---
@@ -15,13 +15,10 @@ The `DeploymentStatus` enum is defined in `packages/database/prisma/schema.prism
     The `Deployment` record is created with status `PENDING` and an initial job is added to the `deployment-queue` BullMQ queue. The deployment URL and port are both `null` at this stage.
   </Step>
   <Step title="CLONING">
-    The worker picks up the job from `deployment-queue` and forwards it to `execution-queue`. The builder then consumes the job, sets status to `CLONING`, and runs a shallow `git clone --depth 1` of the target branch into a temporary directory under `os.tmpdir()`. The clone operation has a 60-second timeout.
+    The worker picks up the job from `deployment-queue` and forwards it to `execution-queue`. The builder then consumes the job, sets status to `CLONING`, and runs a shallow `git clone --depth 1` of the target branch into a temporary directory under `os.tmpdir()`.
   </Step>
   <Step title="BUILDING">
-    Status advances to `BUILDING`. The builder detects the framework and package manager, copies the matching Dockerfile template into the project directory, writes a `.env` file containing any configured environment variables, and executes `docker build`. All stdout and stderr output from Docker is published to the live log stream. The overall build timeout is 600 seconds (10 minutes).
-  </Step>
-  <Step title="DEPLOYING">
-    For dynamic applications (Next.js and Node.js), status moves to `DEPLOYING` once the image is built. The builder claims an available port, starts the container with `docker run -d`, waits 5 seconds for the process to boot, and then begins the HTTP health check sequence.
+    Status advances to `BUILDING`. The builder allocates a port from the Redis pool, detects the framework and package manager, copies the matching Dockerfile template into the project directory, writes a `.env` file containing any configured environment variables, and executes `docker build`. All stdout and stderr output from Docker is published to the live log stream. The overall build timeout is 600 seconds (10 minutes).
   </Step>
   <Step title="SUCCESS">
     After a successful health check (or a completed R2 upload for static sites), the deployment is marked `SUCCESS`. The `port`, `url`, and `completedAt` fields are written to the `Deployment` record. The parent `Project` row is updated with `deploymentUrl` and a `metadata` JSON object containing `containerId`, `imageName`, `isStatic`, and `r2Path`.
@@ -31,7 +28,7 @@ The `DeploymentStatus` enum is defined in `packages/database/prisma/schema.prism
   </Step>
 </Steps>
 
-The schema also defines two intermediate statuses — `DETECTING` and `ALLOCATING` — that the builder may use during the framework detection and port allocation sub-steps before `BUILDING` and `DEPLOYING` respectively.
+The schema also defines three additional enum values — `DETECTING`, `ALLOCATING`, and `DEPLOYING` — that are reserved for future use and displayed by the frontend when present. The builder itself transitions directly from `CLONING` to `BUILDING` and then to `SUCCESS` or `FAILED`.
 
 ## Two-Stage Queue Architecture
 

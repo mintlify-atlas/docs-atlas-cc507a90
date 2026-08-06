@@ -1,7 +1,7 @@
 ---
 title: "Deploy Your App Architecture and Microservices Overview"
 sidebarTitle: "Architecture"
-description: "Explore how Deploy Your App organizes its monorepo into discrete microservices, shared packages, and infrastructure layers connected by BullMQ queues and Redis."
+description: "Explore how Deploy Your App organizes its monorepo into microservices, shared packages, and infrastructure layers connected by BullMQ queues and Redis."
 ---
 
 Deploy Your App is structured as a TurboRepo monorepo containing six independent microservices under `apps/`, three shared packages under `packages/`, and a Dockerized infrastructure layer under `infra/`. Each service has a clearly scoped responsibility and communicates with its peers either through HTTP or through BullMQ job queues backed by Redis, so any single service can be scaled, restarted, or replaced without affecting the others.
@@ -10,7 +10,7 @@ Deploy Your App is structured as a TurboRepo monorepo containing six independent
 
 | Service | Path | Role |
 |---------|------|------|
-| web | `apps/web` | Next.js frontend + REST API |
+| web | `apps/web` | Next.js dashboard frontend |
 | api | `apps/api` | GitHub webhook handler (Express) |
 | builder | `apps/builder` | Build/deploy worker (BullMQ + Docker) |
 | worker | `apps/worker` | Job dispatcher (BullMQ) |
@@ -20,7 +20,7 @@ Deploy Your App is structured as a TurboRepo monorepo containing six independent
 ## Infrastructure
 
 | Component | Version | Purpose |
-|-----------|---------|---------|
+|-----------|---------|---------| 
 | PostgreSQL | 16 | Primary data store, accessed via Prisma ORM |
 | Redis | 7 | BullMQ queue backend + pub/sub channel for live build logs |
 | Caddy | latest | TLS termination and reverse proxy frontend |
@@ -32,7 +32,7 @@ All three infrastructure services are defined in the root `docker-compose.yml` a
 The platform uses three BullMQ queues, all sharing the `launchdrop` key prefix in Redis. The prefix ensures queue keys are namespaced and do not collide with any other Redis data.
 
 | Queue name | Producer | Consumer | Purpose |
-|------------|----------|----------|---------|
+|------------|----------|----------|---------| 
 | `deployment-queue` | `apps/api` (web API) | `apps/worker` | Receives new deployment jobs when a deploy is triggered |
 | `execution-queue` | `apps/worker` | `apps/builder` | Receives dispatched jobs forwarded by the worker |
 | `notification-queue` | `apps/api` / `apps/builder` | `apps/nortification` | Delivers notification events (email, Slack, Discord) |
@@ -68,18 +68,16 @@ flowchart TD
         Redis[("Redis")]
         Caddy[("Caddy Proxy")]
     end
-    Web <--> Proxy
-    Proxy <--> API
-    API <--> Postgres
-    API <--> Queue
-    Builder <--> Queue
-    Worker <--> Queue
-    Notification <--> Queue
-    API <--> Notification
-    API <--> Builder
-    Queue[("BullMQ/Redis Queue")]
     Web <--> API
-    Proxy <--> Web
+    Web <--> Proxy
+    Proxy <--> Builder
+    API <--> Postgres
+    API --> DeploymentQueue["deployment-queue"]
+    DeploymentQueue --> Worker
+    Worker --> ExecutionQueue["execution-queue"]
+    ExecutionQueue --> Builder
+    Builder <--> Redis
+    Notification <--> Redis
     Caddy <--> Proxy
     Caddy <--> Web
 ```

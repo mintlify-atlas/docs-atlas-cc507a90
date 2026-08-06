@@ -1,7 +1,7 @@
 ---
 title: "POST /api/v1/projects/import — Import a GitHub Repository"
 sidebarTitle: "Import Project"
-description: "Create a new project from a GitHub repository and immediately trigger the first deployment. Registers a webhook and encrypts all supplied environment variables."
+description: "Create a new project from a GitHub repository and trigger the first deployment. Registers a push webhook and encrypts all supplied environment variables."
 ---
 
 The Import Project endpoint is the starting point for every new application on the platform. It creates a project record linked to a GitHub repository, optionally stores encrypted environment variables, registers a GitHub webhook so future pushes automatically trigger deployments, and then queues an initial deployment against the specified default branch — all in a single atomic request.

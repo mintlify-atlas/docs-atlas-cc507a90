@@ -1,5 +1,5 @@
 ---
-title: "Deploy Your App REST API Reference Overview"
+title: "Deploy Your App REST API: Endpoints and Response Format"
 sidebarTitle: "Overview"
 description: "Explore the Deploy Your App REST API — a JSON HTTP API served under /api/v1/, with endpoints for projects, deployments, repositories, and webhooks."
 ---
@@ -27,19 +27,24 @@ The table below lists every available route, grouped by resource. Dynamic segmen
 | `DELETE` | `/api/v1/projects/:id` | Permanently delete a project |
 | `POST` | `/api/v1/projects/:id/deploy` | Trigger a manual deployment for a project |
 | `POST` | `/api/v1/projects/:id/envs` | Add or update an environment variable |
-| `DELETE` | `/api/v1/projects/:id/envs` | Delete an environment variable |
-| `POST` | `/api/v1/projects/:id/domain/verify` | Verify a custom domain is correctly pointed |
+| `DELETE` | `/api/v1/projects/:id/envs` | Delete an environment variable by `envId` query param |
+| `POST` | `/api/v1/projects/:id/domain/verify` | Verify a custom domain CNAME record |
+| `GET` | `/api/v1/projects/:id/server-logs` | Stream live container logs for a running project (SSE) |
 | `GET` | `/api/v1/deployments` | List recent deployments across all projects |
 | `GET` | `/api/v1/deployments/:id` | Get a single deployment by ID |
-| `GET` | `/api/v1/deployments/:id/logs` | Stream or fetch logs for a deployment |
+| `GET` | `/api/v1/deployments/:id/logs` | Stream build logs for a deployment (SSE) |
 | `GET` | `/api/v1/repository` | List GitHub repositories accessible to the authenticated user |
 | `POST` | `/webhook/:projectId` | Receive a GitHub push event and trigger a new deployment |
 
+<Note>
+  The `POST /webhook/:projectId` endpoint is handled by a dedicated Express API service (the `apps/api` package), not by the Next.js application. It runs on a separate port and is called directly by GitHub — not under the `/api/v1/` prefix.
+</Note>
+
 ## Response Format
 
-All endpoints return JSON. Successful responses carry a `message` field describing the outcome and, when data is returned, a `data` field containing the resource payload. Error responses carry a single `error` field with a human-readable message.
+Most endpoints return JSON. The majority of successful responses carry a `message` field describing the outcome and, when data is returned, a `data` field containing the resource payload. A small number of routes return a flatter shape — see the notes below. Error responses always carry a single `error` field with a human-readable message.
 
-**Success response shape:**
+**Standard success response shape** (used by most `/api/v1/` routes):
 
 ```json
 {
@@ -48,6 +53,16 @@ All endpoints return JSON. Successful responses carry a `message` field describi
     "projects": [...]
   }
 }
+```
+
+**Flat success response shape** (used by `POST /api/v1/projects/import` and `GET /api/v1/repository`):
+
+```json
+{ "project": { ... }, "deployment": { ... } }
+```
+
+```json
+{ "repositories": [...] }
 ```
 
 **Error response shape:**

@@ -1,7 +1,7 @@
 ---
 title: "GET /api/v1/deployments/:id/logs — Fetch Deployment Logs"
 sidebarTitle: "Deployment Logs"
-description: "Stream real-time deployment log output via Server-Sent Events using a Redis pub/sub channel scoped to a single deployment ID."
+description: "Stream real-time deployment log output via Server-Sent Events (SSE), backed by a Redis pub/sub channel scoped to a single deployment."
 ---
 
 The Deployment Logs endpoint opens a **Server-Sent Events (SSE)** stream that delivers log lines in real time as your deployment progresses. Under the hood, the API subscribes to a Redis channel keyed to the deployment ID (`logs:<id>`). As the build worker publishes messages — covering everything from repository cloning through Docker build output to container startup — they are forwarded to the browser or client instantly, with no polling required.
