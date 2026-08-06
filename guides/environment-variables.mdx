@@ -1,0 +1,112 @@
+---
+title: "Manage Environment Variables for Your Deployments"
+sidebarTitle: "Env Variables"
+description: "Add, update, and delete AES-256-GCM encrypted environment variables that are injected into your Docker build context at deploy time."
+---
+
+Environment variables on Deploy Your App are encrypted at rest using **AES-256-GCM** before being written to PostgreSQL. The encryption is keyed by `MASTER_ENCRYPTION_KEY` — a server-side secret that must be at least 32 characters long. At deploy time, the builder retrieves each variable from the database, decrypts it, and writes all variables to a `.env` file that is placed inside the Docker build context before the image is built. This means your variables are available both during the `docker build` step (for build-time args) and at container runtime.
+
+<Warning>
+  Changing or adding environment variables does **not** automatically restart or redeploy your application. The updated values are only applied the next time a deployment runs. After saving changes to your variables, trigger a manual redeploy from the project dashboard (or push a commit to your production branch) to apply them.
+</Warning>
+
+---
+
+## Managing variables via the dashboard
+
+Open your project in the dashboard and scroll to the **Environment Variables** card. The Env Manager UI lets you:
+
+- **Add a variable** — type the key (automatically uppercased) and value into the form fields, then click **Add Variable**. The value field is masked by default.
+- **Delete a variable** — hover over an existing variable row to reveal the delete button, then confirm the prompt.
+
+Variable values are never returned in plaintext from the API. The dashboard shows `••••••••••••••••` for all stored values because the encrypted ciphertext is stored in the database and the decrypted value is only ever passed to the build worker — never to the browser.
+
+---
+
+## Managing variables via the API
+
+### Add or update a variable
+
+Send a `POST` request to `/api/v1/projects/:id/envs`. The endpoint **upserts by key**: if a variable with the same key already exists for the project it is updated; otherwise a new record is created.
+
+```bash
+curl -X POST https://your-domain.com/api/v1/projects/PROJECT_ID/envs \
+  -H 'Content-Type: application/json' \
+  -b 'session=YOUR_SESSION_COOKIE' \
+  -d '{"key": "DATABASE_URL", "value": "postgres://user:pass@host:5432/db"}'
+```
+
+**Request body**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `key` | `string` | ✅ Yes | Variable name, e.g. `DATABASE_URL` |
+| `value` | `string` | ✅ Yes | Plaintext value — encrypted before storage |
+
+**Response**
+
+```json
+{ "message": "Environment variable saved" }
+```
+
+### Delete a variable
+
+Send a `DELETE` request to `/api/v1/projects/:id/envs` with the `envId` query parameter. You can find the `envId` from the project detail API response.
+
+```bash
+curl -X DELETE \
+  "https://your-domain.com/api/v1/projects/PROJECT_ID/envs?envId=ENV_RECORD_ID" \
+  -b 'session=YOUR_SESSION_COOKIE'
+```
+
+**Response**
+
+```json
+{ "message": "Environment variable deleted" }
+```
+
+---
+
+## How encryption works
+
+Variable values are encrypted using `AES-256-GCM` via Node.js's built-in `node:crypto` module (see `packages/database/src/crypto.ts`). The process works as follows:
+
+1. A random 12-byte IV is generated for every encryption call.
+2. The value is encrypted using the first 32 bytes of `MASTER_ENCRYPTION_KEY` as the cipher key.
+3. The GCM authentication tag (16 bytes) is computed to guarantee integrity.
+4. The result is stored as a colon-delimited string in the format `iv:authTag:ciphertext` (all hex-encoded).
+
+On deployment, the worker calls `decrypt(value, MASTER_ENCRYPTION_KEY)` for each variable, verifies the auth tag, and writes the plaintext value into the `.env` file.
+
+<Note>
+  `MASTER_ENCRYPTION_KEY` must be set in your server environment. If it is missing or shorter than 32 characters, any attempt to save an environment variable will return `500 Server configuration error` and the variable will not be stored.
+</Note>
+
+---
+
+## Security considerations
+
+- **Values are redacted from build logs.** The builder scans all log output for known env var values and replaces them with `[REDACTED]` before the logs are stored or streamed to the dashboard. This prevents accidental secret exposure in build output.
+- **Encrypted ciphertext is never sent to the browser.** The project API returns `Env` records including the `key` but the encrypted `value` is not included in dashboard responses.
+- **Rotate `MASTER_ENCRYPTION_KEY` carefully.** If you change the key, any previously encrypted variables cannot be decrypted. Re-enter all variable values after a key rotation.
+- **`.env` file scope.** The `.env` file is written into the Docker build context only — it is not committed to your repository and is not included in the final image layer pushed to Cloudflare R2.
+
+---
+
+## Adding variables during project import
+
+You can supply environment variables at import time as part of the `POST /api/v1/projects/import` request body. Variables are encrypted and stored before the first build job is enqueued, so they are available immediately in the initial deployment.
+
+```json
+{
+  "repositoryFullName": "owner/repo",
+  "name": "my-app",
+  "defaultBranch": "main",
+  "envs": [
+    { "key": "API_SECRET", "value": "super-secret-value" },
+    { "key": "NODE_ENV", "value": "production" }
+  ]
+}
+```
+
+See [Import a Project](/guides/import-project) for the full import workflow.

@@ -1,0 +1,168 @@
+---
+title: "GET /api/v1/deployments — List Recent Deployments"
+sidebarTitle: "List Deployments"
+description: "Retrieve up to 50 of the most recent deployments across all projects owned by the authenticated user, ordered by creation date descending."
+---
+
+The List Deployments endpoint returns a paginated snapshot of your most recent deployment activity across every project in your account. Each deployment object includes a fully embedded `project` relation, so you have everything you need — project name, repository, and deployment URL — in a single request without additional round-trips.
+
+## `GET /api/v1/deployments`
+
+<Note>
+  This endpoint requires an active session. Authentication is handled via a
+  session cookie issued after sign-in. See the
+  [Authentication](/api-reference/authentication) reference for details.
+</Note>
+
+---
+
+## Request
+
+This endpoint accepts no query parameters or request body. Results are automatically scoped to the authenticated user — you will never see deployments belonging to other accounts.
+
+---
+
+## Response
+
+A successful response returns HTTP **200** with the following shape:
+
+```json
+{
+  "message": "Deployments fetched successfully",
+  "data": {
+    "deployments": [ /* array of Deployment objects, each with an embedded project */ ]
+  }
+}
+```
+
+### Deployment fields
+
+<ResponseField name="data.deployments" type="array">
+  Ordered array of up to 50 deployment objects, newest first.
+
+  <Expandable title="Deployment object">
+    <ResponseField name="id" type="string">
+      CUID uniquely identifying the deployment (e.g., `clxyz123abc...`).
+    </ResponseField>
+
+    <ResponseField name="projectId" type="string">
+      CUID of the parent project this deployment belongs to.
+    </ResponseField>
+
+    <ResponseField name="branch" type="string">
+      The Git branch that triggered this deployment (e.g., `main`, `feature/my-branch`).
+    </ResponseField>
+
+    <ResponseField name="commitHash" type="string | null">
+      The full SHA of the commit that was deployed. `null` if the deployment was
+      triggered without a specific commit reference.
+    </ResponseField>
+
+    <ResponseField name="status" type="DeploymentStatus">
+      Current lifecycle stage of the deployment. One of:
+
+      | Value | Meaning |
+      |---|---|
+      | `PENDING` | Job is queued, not yet started |
+      | `CLONING` | Repository is being cloned |
+      | `DETECTING` | Framework / runtime is being auto-detected |
+      | `ALLOCATING` | A container port is being allocated |
+      | `BUILDING` | Docker image is being built |
+      | `DEPLOYING` | Container is starting up |
+      | `SUCCESS` | Deployment is live and healthy |
+      | `FAILED` | Deployment ended with an error |
+    </ResponseField>
+
+    <ResponseField name="url" type="string | null">
+      Public URL of the running deployment. Only populated once status is `SUCCESS`.
+    </ResponseField>
+
+    <ResponseField name="port" type="integer | null">
+      Internal container port allocated for this deployment. `null` until the
+      `ALLOCATING` stage completes.
+    </ResponseField>
+
+    <ResponseField name="logs" type="string | null">
+      Stored build-and-deploy log output. Populated after the deployment
+      completes (either `SUCCESS` or `FAILED`). During active deployments,
+      use the [Deployment Logs](/api-reference/deployments/logs) SSE stream.
+    </ResponseField>
+
+    <ResponseField name="error" type="string | null">
+      Human-readable error message when `status` is `FAILED`. `null` otherwise.
+    </ResponseField>
+
+    <ResponseField name="createdAt" type="string (ISO 8601)">
+      Timestamp when the deployment record was created.
+    </ResponseField>
+
+    <ResponseField name="updatedAt" type="string (ISO 8601)">
+      Timestamp of the most recent status update.
+    </ResponseField>
+
+    <ResponseField name="completedAt" type="string | null (ISO 8601)">
+      Timestamp when the deployment reached a terminal state (`SUCCESS` or
+      `FAILED`). `null` while still in progress.
+    </ResponseField>
+
+    <ResponseField name="project" type="object">
+      Full project object embedded in every deployment. Key fields include
+      `id`, `name`, `repositoryFullName`, `defaultBranch`, `deploymentUrl`,
+      `buildCommand`, `startCommand`, and `rootDirectory`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Example
+
+```bash
+curl -X GET https://your-domain.com/api/v1/deployments \
+  -H "Cookie: session=<your-session-token>"
+```
+
+**Example response:**
+
+```json
+{
+  "message": "Deployments fetched successfully",
+  "data": {
+    "deployments": [
+      {
+        "id": "clxyz123abc456def",
+        "projectId": "clproj789ghi012jkl",
+        "branch": "main",
+        "commitHash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+        "status": "SUCCESS",
+        "url": "https://my-app.your-domain.com",
+        "port": 3001,
+        "logs": "[SYSTEM] Build completed successfully\n...",
+        "error": null,
+        "createdAt": "2024-11-01T12:00:00.000Z",
+        "updatedAt": "2024-11-01T12:03:42.000Z",
+        "completedAt": "2024-11-01T12:03:42.000Z",
+        "project": {
+          "id": "clproj789ghi012jkl",
+          "name": "my-app",
+          "repositoryFullName": "acme-org/my-app",
+          "defaultBranch": "main",
+          "deploymentUrl": "https://my-app.your-domain.com",
+          "buildCommand": "npm run build",
+          "startCommand": "npm start",
+          "rootDirectory": null
+        }
+      }
+    ]
+  }
+}
+```
+
+---
+
+## Error Responses
+
+| Status | Error | Description |
+|--------|-------|-------------|
+| `401` | `Unauthorized` | No valid session cookie was provided. |
+| `500` | `Failed to fetch deployments` | An unexpected server-side error occurred. |

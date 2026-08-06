@@ -1,0 +1,270 @@
+---
+title: "GET /api/v1/projects/:id — Get Project with Deployments"
+sidebarTitle: "Get Project"
+description: "Fetch a single project by ID, including its full deployment history ordered newest-first and all stored environment variables."
+---
+
+The Get Project endpoint retrieves a single project by its ID alongside two related datasets: the complete deployment history (ordered from newest to oldest) and all environment variable keys associated with the project. This is the primary endpoint for building a project detail view or monitoring deployment progress.
+
+**`GET /api/v1/projects/:id`**
+
+## Authentication
+
+<Note>
+  This endpoint requires an active session. Include your session cookie with every request. See [Authentication](/api-reference/authentication) for details on obtaining a session token.
+</Note>
+
+## Request
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  The unique project ID (cuid). Obtain this from the [List Projects](/api-reference/projects/list) endpoint.
+</ParamField>
+
+## Response
+
+A successful `200 OK` response returns the project with its deployments and environment variables embedded:
+
+```json
+{
+  "message": "Project fetched successfully",
+  "data": {
+    "project": Project & { deployments: Deployment[], envs: Env[] }
+  }
+}
+```
+
+### Response Fields
+
+<ResponseField name="message" type="string">
+  Human-readable status message — `"Project fetched successfully"`.
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Wrapper object containing the result payload.
+
+  <Expandable title="data">
+    <ResponseField name="project" type="object">
+      The full project object, including nested deployments and environment variables.
+
+      <Expandable title="Project">
+        <ResponseField name="id" type="string">
+          Unique project identifier (cuid).
+        </ResponseField>
+
+        <ResponseField name="userId" type="string">
+          ID of the owning user.
+        </ResponseField>
+
+        <ResponseField name="name" type="string">
+          Display name for the project.
+        </ResponseField>
+
+        <ResponseField name="repositoryFullName" type="string">
+          Full GitHub repository path, e.g. `"owner/repo"`.
+        </ResponseField>
+
+        <ResponseField name="defaultBranch" type="string">
+          Branch used for production deployments.
+        </ResponseField>
+
+        <ResponseField name="buildCommand" type="string | null">
+          Custom build command, or `null` if auto-detected.
+        </ResponseField>
+
+        <ResponseField name="startCommand" type="string | null">
+          Custom start command, or `null` if auto-detected.
+        </ResponseField>
+
+        <ResponseField name="rootDirectory" type="string | null">
+          Application root path within the repository, or `null`.
+        </ResponseField>
+
+        <ResponseField name="deploymentUrl" type="string | null">
+          Auto-generated production URL after a successful deployment.
+        </ResponseField>
+
+        <ResponseField name="customDomain" type="string | null">
+          Custom hostname if configured, otherwise `null`.
+        </ResponseField>
+
+        <ResponseField name="customDomainVerified" type="boolean">
+          Whether the custom domain has been DNS-verified.
+        </ResponseField>
+
+        <ResponseField name="createdAt" type="string">
+          ISO 8601 creation timestamp.
+        </ResponseField>
+
+        <ResponseField name="updatedAt" type="string">
+          ISO 8601 last-updated timestamp.
+        </ResponseField>
+
+        <ResponseField name="deployments" type="Deployment[]">
+          All deployments for this project, ordered by `createdAt` descending (newest first).
+
+          <Expandable title="Deployment">
+            <ResponseField name="id" type="string">
+              Unique deployment identifier (cuid).
+            </ResponseField>
+
+            <ResponseField name="projectId" type="string">
+              ID of the parent project.
+            </ResponseField>
+
+            <ResponseField name="branch" type="string">
+              Git branch that triggered this deployment.
+            </ResponseField>
+
+            <ResponseField name="commitHash" type="string | null">
+              Full SHA of the deployed commit, or `null` if not yet resolved.
+            </ResponseField>
+
+            <ResponseField name="status" type="DeploymentStatus">
+              Current lifecycle status. One of: `PENDING`, `CLONING`, `DETECTING`, `ALLOCATING`, `BUILDING`, `DEPLOYING`, `SUCCESS`, `FAILED`.
+            </ResponseField>
+
+            <ResponseField name="url" type="string | null">
+              Deployment-specific URL once the container is live. `null` until deployment succeeds.
+            </ResponseField>
+
+            <ResponseField name="port" type="integer | null">
+              Internal container port assigned to this deployment. `null` until allocated.
+            </ResponseField>
+
+            <ResponseField name="logs" type="string | null">
+              Accumulated build and runtime log output. `null` if no logs are available yet.
+            </ResponseField>
+
+            <ResponseField name="error" type="string | null">
+              Error message if the deployment failed. `null` on success or while in-progress.
+            </ResponseField>
+
+            <ResponseField name="createdAt" type="string">
+              ISO 8601 timestamp when the deployment record was created.
+            </ResponseField>
+
+            <ResponseField name="updatedAt" type="string">
+              ISO 8601 timestamp of the most recent status update.
+            </ResponseField>
+
+            <ResponseField name="completedAt" type="string | null">
+              ISO 8601 timestamp when the deployment reached a terminal state (`SUCCESS` or `FAILED`). `null` while in-progress.
+            </ResponseField>
+          </Expandable>
+        </ResponseField>
+
+        <ResponseField name="envs" type="Env[]">
+          Environment variables associated with this project.
+
+          <Expandable title="Env">
+            <ResponseField name="id" type="string">
+              Unique env record identifier (cuid).
+            </ResponseField>
+
+            <ResponseField name="key" type="string">
+              Environment variable name, e.g. `"DATABASE_URL"`.
+            </ResponseField>
+
+            <ResponseField name="value" type="string">
+              Encrypted environment variable value (encrypted at rest).
+            </ResponseField>
+
+            <ResponseField name="projectId" type="string">
+              ID of the parent project.
+            </ResponseField>
+
+            <ResponseField name="createdAt" type="string">
+              ISO 8601 creation timestamp.
+            </ResponseField>
+
+            <ResponseField name="updatedAt" type="string">
+              ISO 8601 last-updated timestamp.
+            </ResponseField>
+          </Expandable>
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Deployment Status Reference
+
+| Status | Description |
+|--------|-------------|
+| `PENDING` | Deployment has been queued but not yet started. |
+| `CLONING` | The repository is being cloned from GitHub. |
+| `DETECTING` | The framework and runtime are being auto-detected. |
+| `ALLOCATING` | A container port is being reserved. |
+| `BUILDING` | The application is being built inside the container. |
+| `DEPLOYING` | The built container is being started and routed. |
+| `SUCCESS` | Deployment completed successfully and is live. |
+| `FAILED` | Deployment encountered an unrecoverable error. |
+
+## Example
+
+```bash
+curl -X GET https://your-domain.com/api/v1/projects/clx4z2k0e0000abc123def456 \
+  -H 'Content-Type: application/json' \
+  -b 'better-auth.session_token=YOUR_SESSION_TOKEN'
+```
+
+**Example response:**
+
+```json
+{
+  "message": "Project fetched successfully",
+  "data": {
+    "project": {
+      "id": "clx4z2k0e0000abc123def456",
+      "userId": "user_01hxyz",
+      "name": "My Next.js App",
+      "repositoryFullName": "acme/my-nextjs-app",
+      "defaultBranch": "main",
+      "buildCommand": null,
+      "startCommand": null,
+      "rootDirectory": null,
+      "deploymentUrl": "https://my-nextjs-app.your-domain.com",
+      "customDomain": null,
+      "customDomainVerified": false,
+      "createdAt": "2024-06-01T12:00:00.000Z",
+      "updatedAt": "2024-06-10T09:30:00.000Z",
+      "deployments": [
+        {
+          "id": "clx5a3b1c0001xyz789ghi012",
+          "projectId": "clx4z2k0e0000abc123def456",
+          "branch": "main",
+          "commitHash": "a1b2c3d4e5f6...",
+          "status": "SUCCESS",
+          "url": "https://my-nextjs-app.your-domain.com",
+          "port": 3001,
+          "logs": "Build completed in 42s...",
+          "error": null,
+          "createdAt": "2024-06-10T09:00:00.000Z",
+          "updatedAt": "2024-06-10T09:30:00.000Z",
+          "completedAt": "2024-06-10T09:30:00.000Z"
+        }
+      ],
+      "envs": [
+        {
+          "id": "clx5d4e2f0002pqr345stu678",
+          "key": "DATABASE_URL",
+          "value": "enc:v1:...",
+          "projectId": "clx4z2k0e0000abc123def456",
+          "createdAt": "2024-06-01T12:00:00.000Z",
+          "updatedAt": "2024-06-01T12:00:00.000Z"
+        }
+      ]
+    }
+  }
+}
+```
+
+## Error Responses
+
+| Status | Error Message | Description |
+|--------|--------------|-------------|
+| `401` | `"Unauthorized"` | No valid session cookie was provided. |
+| `404` | `"project not found"` | No project with the given ID exists, or it belongs to another user. |
+| `500` | `"failed to fetch project"` | An unexpected server-side error occurred. |

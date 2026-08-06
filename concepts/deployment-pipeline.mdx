@@ -1,0 +1,104 @@
+---
+title: "Deployment Pipeline Stages and Status Lifecycle"
+sidebarTitle: "Deployment Pipeline"
+description: "Understand every stage of the Deploy Your App pipeline from PENDING through SUCCESS, including the two-stage queue design and real-time log streaming."
+---
+
+Every deployment in Deploy Your App moves through a well-defined, event-driven pipeline. When you trigger a deploy — either manually from the dashboard or automatically via a GitHub webhook — the platform creates a `Deployment` record in PostgreSQL, enqueues a job, and hands off execution to a chain of independent services. Each stage updates the deployment status in the database and publishes log chunks to Redis so the dashboard can reflect progress in real time without polling.
+
+## Deployment Status Lifecycle
+
+The `DeploymentStatus` enum is defined in `packages/database/prisma/schema.prisma` and contains the following values:
+
+<Steps>
+  <Step title="PENDING">
+    The `Deployment` record is created with status `PENDING` and an initial job is added to the `deployment-queue` BullMQ queue. The deployment URL and port are both `null` at this stage.
+  </Step>
+  <Step title="CLONING">
+    The worker picks up the job from `deployment-queue` and forwards it to `execution-queue`. The builder then consumes the job, sets status to `CLONING`, and runs a shallow `git clone --depth 1` of the target branch into a temporary directory under `os.tmpdir()`. The clone operation has a 60-second timeout.
+  </Step>
+  <Step title="BUILDING">
+    Status advances to `BUILDING`. The builder detects the framework and package manager, copies the matching Dockerfile template into the project directory, writes a `.env` file containing any configured environment variables, and executes `docker build`. All stdout and stderr output from Docker is published to the live log stream. The overall build timeout is 600 seconds (10 minutes).
+  </Step>
+  <Step title="DEPLOYING">
+    For dynamic applications (Next.js and Node.js), status moves to `DEPLOYING` once the image is built. The builder claims an available port, starts the container with `docker run -d`, waits 5 seconds for the process to boot, and then begins the HTTP health check sequence.
+  </Step>
+  <Step title="SUCCESS">
+    After a successful health check (or a completed R2 upload for static sites), the deployment is marked `SUCCESS`. The `port`, `url`, and `completedAt` fields are written to the `Deployment` record. The parent `Project` row is updated with `deploymentUrl` and a `metadata` JSON object containing `containerId`, `imageName`, `isStatic`, and `r2Path`.
+  </Step>
+  <Step title="FAILED">
+    If any step throws an error, the status is set to `FAILED` and the error message is persisted to the `error` column. All Docker containers, images, and the cloned repository are cleaned up via `performFullCleanup`. The allocated port, if any, is released back to the Redis pool.
+  </Step>
+</Steps>
+
+The schema also defines two intermediate statuses — `DETECTING` and `ALLOCATING` — that the builder may use during the framework detection and port allocation sub-steps before `BUILDING` and `DEPLOYING` respectively.
+
+## Two-Stage Queue Architecture
+
+The platform routes deployment jobs through two separate BullMQ queues rather than a single one.
+
+```
+Web API
+  │
+  ▼
+deployment-queue  ──►  worker  ──►  execution-queue  ──►  builder
+(launchdrop prefix)               (launchdrop prefix)
+```
+
+The **web API** (or GitHub webhook handler in `apps/api`) adds a job to `deployment-queue`. The **worker** in `apps/worker` is the sole consumer of that queue; its only job is to validate the payload and immediately re-enqueue the job on `execution-queue`. The **builder** in `apps/builder` consumes `execution-queue` and performs all the heavy lifting.
+
+This two-stage design gives you a clean place to add throttling, priority routing, or pre-flight checks without coupling that logic to the build runtime. The worker's `concurrency` is fixed at `1` — it dispatches one job at a time — while the builder's concurrency is configurable via the `WORKER_CONCURRENCY` environment variable.
+
+All three queue instances (`deployment-queue`, `execution-queue`, `notification-queue`) are exported from `@workspace/queue` and share the following default job options:
+
+```ts
+const defaultOptions = {
+  attempts: 1,
+  backoff: { type: "exponential", delay: 2000 },
+  removeOnComplete: true,
+  removeOnFail: 1000,
+  timeout: 1000 * 60 * 15, // 15 minutes
+}
+```
+
+## Real-Time Log Streaming
+
+As the builder processes each stage it publishes log chunks to a Redis pub/sub channel named `logs:{deploymentId}`:
+
+```ts
+// apps/builder/src/utils/utils.ts
+export const publishLog = async (deploymentId: string, message: string) => {
+  await redisPublisher.publish(`logs:${deploymentId}`, message)
+}
+```
+
+The web dashboard subscribes to this channel as soon as a deployment is triggered. Every line written by `docker build`, the git clone process, or system status messages (prefixed with `[SYSTEM]`) is forwarded to the subscriber in real time. Secret values are redacted before publication, so environment variable contents never appear in the streamed output.
+
+## Container Health Check
+
+After starting a dynamic container the builder waits **5 seconds** (`CONTAINER_BOOT_WAIT_MS = 5000`) for the process to initialize, then polls `http://127.0.0.1:{port}` in a loop:
+
+- **Maximum attempts:** 15
+- **Interval between attempts:** 1 second
+- **Success condition:** any HTTP response with a status code greater than 0
+
+If all 15 attempts fail, the builder captures `docker logs` output and `docker inspect` state for debugging, removes the container, and returns a failure result that triggers the `FAILED` status path.
+
+## Cleanup Behavior
+
+The builder always performs cleanup in a `finally` block, ensuring the temporary repository directory is deleted from disk regardless of outcome. On a successful deployment the previous container and image for the same project are also removed:
+
+```ts
+// If an older container was running for this project, stop and remove it
+if (oldMetadata?.containerId && oldMetadata.containerId !== buildResult.containerId) {
+  await cleanupDockerResources(oldMetadata.containerId, oldMetadata.imageName)
+}
+```
+
+For static Vite deployments, the Docker image and the extraction container are removed immediately after the files have been uploaded to R2 — no container is left running.
+
+On failure, `performFullCleanup` is called explicitly in the `catch` block before the `finally` cleanup, passing `forceRemoveImage: true` to ensure the failed image does not consume disk space.
+
+<Note>
+The number of concurrent builds the builder can run in parallel is controlled by the `WORKER_CONCURRENCY` environment variable on the `apps/builder` service. It defaults to `1` if the variable is not set. Increase this value to allow multiple deployments to build simultaneously, keeping in mind that each concurrent build requires its own Docker daemon capacity and an available port in the 5000–5100 range.
+</Note>

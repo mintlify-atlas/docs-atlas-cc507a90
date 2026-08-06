@@ -1,0 +1,111 @@
+---
+title: "How Deploy Your App Detects and Builds Your Project"
+sidebarTitle: "Build System"
+description: "Learn how Deploy Your App auto-detects your framework and package manager, selects the right Dockerfile template, and handles static vs. dynamic deployments."
+---
+
+Deploy Your App follows a zero-config philosophy: push your code and the platform figures out everything else. The builder service reads your repository, detects the framework and package manager from the files present in the project directory, selects the matching Dockerfile template from `infra/docker/`, injects any environment variables you have configured, and runs the build — all without requiring you to write a single pipeline file.
+
+## Framework Detection
+
+Detection is implemented in `apps/builder/src/utils/detect.ts`. The builder reads `package.json` from the target directory (resolved from `rootDirectory` if set) and merges `dependencies` and `devDependencies` into a flat lookup. It then applies the following rules in priority order:
+
+| Framework | Detection rule | Output directory |
+|-----------|---------------|-----------------|
+| **Next.js** | `next` present in dependencies | `.next` |
+| **Vite** | `vite` present in dependencies | `dist` |
+| **Node.js** | `express`, `fastify`, `koa`, `@nestjs/core`, `hono`, a `start` script, or an `index.js` file | _(none — server process)_ |
+| **Unknown / fallback** | None of the above match | `dist` |
+
+TypeScript support is detected separately: the builder checks for a `typescript` dependency or a `tsconfig.json` file in the project root and sets an `isTypescript` flag used for logging.
+
+### Package Manager Detection
+
+The builder looks for lock files in the following priority order and selects the highest-priority match:
+
+| Lock file | Package manager | Install command |
+|-----------|----------------|----------------|
+| `pnpm-lock.yaml` | pnpm | `pnpm install --frozen-lockfile` |
+| `yarn.lock` | yarn | `yarn install --frozen-lockfile` |
+| `bun.lockb` or `bun.lock` | bun | `bun install --frozen-lockfile` |
+| `package-lock.json` | npm | `npm ci` |
+| _(none found)_ | npm | `npm install` |
+
+If more than one lock file is detected the builder logs a warning and proceeds with the highest-priority match.
+
+## Dockerfile Template Selection
+
+Each combination of framework and package manager maps to a pre-built Dockerfile template stored under `infra/docker/`:
+
+| Framework | Package manager | Template path |
+|-----------|----------------|--------------|
+| Next.js | bun | `infra/docker/nextjs/Dockerfile.bun` |
+| Next.js | npm | `infra/docker/nextjs/Dockerfile.npm` |
+| Next.js | pnpm | `infra/docker/nextjs/Dockerfile.pnpm` |
+| Next.js | yarn | `infra/docker/nextjs/Dockerfile.yarn` |
+| Vite | bun | `infra/docker/vite/Dockerfile.bun` |
+| Vite | npm | `infra/docker/vite/Dockerfile.npm` |
+| Vite | pnpm | `infra/docker/vite/Dockerfile.pnpm` |
+| Vite | yarn | `infra/docker/vite/Dockerfile.yarn` |
+| Node.js | bun | `infra/docker/nodejs/Dockerfile.bun` |
+| Node.js | npm | `infra/docker/nodejs/Dockerfile.npm` |
+| Node.js | pnpm | `infra/docker/nodejs/Dockerfile.pnpm` |
+| Node.js | yarn | `infra/docker/nodejs/Dockerfile.yarn` |
+
+The selected Dockerfile is copied into the target directory before the build runs; it is not committed to your repository.
+
+## Docker Build Arguments
+
+The builder passes the following `--build-arg` flags to `docker build` when the corresponding value is set:
+
+| Build argument | Description | Default |
+|---------------|-------------|---------|
+| `BUILD_COMMAND` | Overrides the default build script for the detected package manager | Dockerfile default (e.g. `bun run build`) |
+| `START_COMMAND` | Overrides the default start command for dynamic (Node.js) containers | `bun run start` |
+| `ROOT_DIR` | Subdirectory within the repository to use as the application root (for monorepos) | `.` (repo root) |
+
+The Node.js Dockerfile (`Dockerfile.bun`) shows how these args slot in at build time:
+
+```dockerfile
+ARG BUILD_COMMAND="bun run build || true"
+RUN sh -c "$BUILD_COMMAND"
+
+ARG START_COMMAND="bun run start"
+ENV START_COMMAND=$START_COMMAND
+CMD sh -c "$START_COMMAND"
+```
+
+## Static vs. Dynamic Deployments
+
+The deployment strategy after the Docker image is built differs based on the detected project type.
+
+### Static (Vite)
+
+1. A temporary Docker container is created (not started) from the built image.
+2. The output directory (`/app/{rootDir}/dist` or the path specified in `outputDirectory`) is extracted via `docker cp`.
+3. The extracted files are uploaded to Cloudflare R2 under the key prefix `deployments/{deploymentId}`.
+4. Both the temporary container and the image are removed — no container stays running.
+5. The proxy serves requests by fetching the correct file from R2 based on the incoming path.
+
+### Dynamic (Next.js / Node.js)
+
+1. The container is started with `docker run -d -p {port}:{targetPort}`.
+2. A health check polls `http://127.0.0.1:{port}` to confirm the process is listening.
+3. The allocated port is recorded on the deployment record in PostgreSQL.
+4. The proxy forwards incoming HTTP and WebSocket traffic directly to `http://localhost:{port}`.
+
+## Port Allocation
+
+Available ports are tracked in a Redis set under the key `launchdrop:used_ports`. The builder scans the range **5000–5100**, atomically claims the first unclaimed port with `SADD`, and maps it to container port `3000` (or the value of the `PORT` environment variable if you have set one). On deployment failure the port is released back to the pool with `SREM`.
+
+## Secret Masking
+
+Every log line emitted during `docker build` and container startup is passed through a `maskSecrets` function before it is stored or streamed. Any env var value longer than three characters is replaced with `[REDACTED]` in the output, so API keys and database passwords never appear in build logs.
+
+<Tip>
+If the auto-detected build or start command is not right for your project, you can override both values in the project settings under **Build & Deploy → Build Command** and **Start Command**. These map directly to the `BUILD_COMMAND` and `START_COMMAND` Docker build arguments.
+</Tip>
+
+<Warning>
+A `package.json` file must exist in the directory the builder resolves as the project root. If your application lives in a subdirectory of the repository, set the **Root Directory** option in project settings to that path (e.g. `apps/web`). Without it, the builder will throw a `CRITICAL: package.json missing` error and mark the deployment as `FAILED`.
+</Warning>

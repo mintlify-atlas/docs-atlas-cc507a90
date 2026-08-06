@@ -1,0 +1,93 @@
+---
+title: "Configure a Custom Domain for Your Deployed App"
+sidebarTitle: "Custom Domains"
+description: "Point your own domain to a deployed project using a CNAME record, then verify ownership through the platform's automated DNS check."
+---
+
+Every project on Deploy Your App receives an automatically generated subdomain under the platform's base domain (e.g. `my-app.your-base-domain.com`). You can also map your own domain — such as `app.example.com` — to a project by creating a CNAME record in your DNS provider and verifying it through the dashboard. Caddy, the platform's reverse proxy, handles TLS certificate provisioning automatically via ACME once verification passes.
+
+<Warning>
+  Custom domains are **globally unique** across all projects on the platform. If a domain is already registered to another project, the request to add it will be rejected. Each project can have at most one custom domain at a time.
+</Warning>
+
+---
+
+## Steps
+
+<Steps>
+  <Step title="Add the custom domain">
+    Open your project in the dashboard and go to **Settings → Domains**. Enter the full hostname you want to use (e.g. `app.example.com`) in the custom domain field and save.
+
+    The platform normalizes the value before storing it:
+    - Strips `https://` or `http://` prefixes
+    - Removes trailing slashes
+    - Lowercases the entire string
+
+    The domain is saved to the `customDomain` field on the `Project` record in PostgreSQL with `customDomainVerified` set to `false`. The domain is **not** active until verification succeeds.
+  </Step>
+
+  <Step title="Create a CNAME record in your DNS provider">
+    Log in to your DNS provider (e.g. Cloudflare, Route 53, Namecheap) and add a CNAME record pointing your hostname to the platform's base domain (`NEXT_PUBLIC_BASE_DOMAIN`).
+
+    | Type | Name | Value | TTL |
+    |---|---|---|---|
+    | `CNAME` | `app` | `your-base-domain.com` | `300` (or Auto) |
+
+    For example, if your domain is `app.example.com` and the platform base domain is `deploy.acme.io`, create a CNAME record with name `app` pointing to `deploy.acme.io`.
+
+    <Note>
+      DNS propagation can take anywhere from a few minutes to **48 hours** depending on your DNS provider and the TTL of the record. The platform's verification will fail until the CNAME record has fully propagated.
+    </Note>
+
+    You can confirm propagation before clicking Verify using `dig` or `nslookup`:
+
+    ```bash
+    dig CNAME app.example.com
+    # or
+    nslookup -type=CNAME app.example.com
+    ```
+
+    The output should show your custom hostname resolving to the platform base domain.
+  </Step>
+
+  <Step title="Verify the domain">
+    Once DNS has propagated, click **Verify Domain** in the dashboard. This calls `POST /api/v1/projects/:id/domain/verify`.
+
+    The server uses Node.js's `dns.resolveCname()` (from `node:dns/promises`) to resolve the CNAME record for your domain and checks that at least one of the returned records matches `NEXT_PUBLIC_BASE_DOMAIN` (case-insensitive).
+
+    If verification succeeds:
+    - The `customDomainVerified` flag on the `Project` record is set to `true`
+    - The platform proxy begins routing traffic for that hostname to your project
+    - Caddy starts the ACME certificate provisioning flow for your domain
+
+    If verification fails, the API returns an error message showing what the CNAME currently resolves to (e.g. `CNAME record does not match deploy.acme.io. Currently points to: old-value.com`). Check your DNS settings and try again after propagation.
+  </Step>
+
+  <Step title="TLS is handled automatically">
+    You do not need to provision or upload any TLS certificates. Caddy automatically obtains a certificate for your custom domain via the ACME protocol (Let's Encrypt or ZeroSSL) once the domain is verified and traffic is routed through the proxy.
+
+    The platform exposes a `/_internal/tls-check` endpoint that Caddy uses to confirm a domain is registered and verified before initiating certificate issuance. This prevents certificates from being issued for domains that haven't been properly set up.
+
+    After a short period (usually under a minute), your application will be reachable over HTTPS at your custom domain.
+  </Step>
+</Steps>
+
+---
+
+## How the proxy routes custom domains
+
+When an inbound HTTP/HTTPS request arrives at the platform proxy on a hostname that does not match the base domain pattern, the proxy:
+
+1. Looks up the `Project` record in the database where `customDomain` equals the request hostname and `customDomainVerified` is `true`.
+2. Reads the project's `metadata.containerId` to determine the running Docker container.
+3. Proxies the request to the container's internal port.
+
+For statically deployed projects (built artifacts stored in Cloudflare R2), the proxy routes the request to the correct R2 bucket path instead of a container.
+
+---
+
+## Removing or changing a custom domain
+
+To remove a custom domain, clear the custom domain field in **Settings → Domains** and save. The `customDomain` field is set to `null` and `customDomainVerified` is reset to `false`. The platform proxy stops routing traffic for that hostname immediately. Caddy will not renew the TLS certificate on its next renewal cycle.
+
+To switch to a different domain, enter the new hostname, save, then follow the CNAME and verification steps above for the new domain.

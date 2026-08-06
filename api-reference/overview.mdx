@@ -1,0 +1,91 @@
+---
+title: "Deploy Your App REST API Reference Overview"
+sidebarTitle: "Overview"
+description: "Explore the Deploy Your App REST API — a JSON HTTP API served under /api/v1/, with endpoints for projects, deployments, repositories, and webhooks."
+---
+
+The Deploy Your App REST API is a JSON HTTP API. All endpoints are served by the Next.js web application under the `/api/v1/` path prefix, meaning there is no separate API host — your self-hosted instance handles every request in the same process that serves the dashboard UI.
+
+## Base URL
+
+All API requests are made to your own instance. Replace `your-domain.com` with the domain where your Deploy Your App web app is running:
+
+```
+https://your-domain.com/api/v1
+```
+
+## All Endpoints
+
+The table below lists every available route, grouped by resource. Dynamic segments are written as `:id`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/projects` | List all projects owned by the authenticated user |
+| `POST` | `/api/v1/projects/import` | Import a GitHub repository as a new project |
+| `GET` | `/api/v1/projects/:id` | Get a single project including its deployments |
+| `PATCH` | `/api/v1/projects/:id` | Update project settings (name, build command, etc.) |
+| `DELETE` | `/api/v1/projects/:id` | Permanently delete a project |
+| `POST` | `/api/v1/projects/:id/deploy` | Trigger a manual deployment for a project |
+| `POST` | `/api/v1/projects/:id/envs` | Add or update an environment variable |
+| `DELETE` | `/api/v1/projects/:id/envs` | Delete an environment variable |
+| `POST` | `/api/v1/projects/:id/domain/verify` | Verify a custom domain is correctly pointed |
+| `GET` | `/api/v1/deployments` | List recent deployments across all projects |
+| `GET` | `/api/v1/deployments/:id` | Get a single deployment by ID |
+| `GET` | `/api/v1/deployments/:id/logs` | Stream or fetch logs for a deployment |
+| `GET` | `/api/v1/repository` | List GitHub repositories accessible to the authenticated user |
+| `POST` | `/webhook/:projectId` | Receive a GitHub push event and trigger a new deployment |
+
+## Response Format
+
+All endpoints return JSON. Successful responses carry a `message` field describing the outcome and, when data is returned, a `data` field containing the resource payload. Error responses carry a single `error` field with a human-readable message.
+
+**Success response shape:**
+
+```json
+{
+  "message": "Projects fetched successfully",
+  "data": {
+    "projects": [...]
+  }
+}
+```
+
+**Error response shape:**
+
+```json
+{
+  "error": "Unauthorized"
+}
+```
+
+## HTTP Status Codes
+
+| Code | Meaning |
+|------|---------|
+| `200 OK` | Request succeeded. Response body contains the requested data. |
+| `201 Created` | Resource was created successfully. |
+| `400 Bad Request` | The request was malformed or missing required fields. |
+| `401 Unauthorized` | No valid session was found. Sign in before retrying. |
+| `404 Not Found` | The requested resource does not exist or does not belong to you. |
+| `500 Internal Server Error` | An unexpected error occurred on the server. |
+
+<Note>
+  All `/api/v1/` endpoints require authentication. Requests without a valid session cookie are rejected with a `401 Unauthorized` response. Authentication is handled via GitHub OAuth — see the [Authentication](/api-reference/authentication) page for details.
+</Note>
+
+## Explore the API
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="lock" href="/api-reference/authentication">
+    Learn how GitHub OAuth session cookies are used to authenticate every API request.
+  </Card>
+  <Card title="Projects" icon="folder" href="/api-reference/projects/list">
+    List, import, update, and delete your deployed projects.
+  </Card>
+  <Card title="Deployments" icon="rocket" href="/api-reference/deployments/list">
+    Browse deployment history and stream build logs.
+  </Card>
+  <Card title="GitHub Webhook" icon="webhook" href="/api-reference/webhooks/github">
+    Understand how GitHub push events automatically trigger new deployments.
+  </Card>
+</CardGroup>

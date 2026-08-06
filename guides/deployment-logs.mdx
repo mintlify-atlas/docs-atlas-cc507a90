@@ -1,0 +1,111 @@
+---
+title: "View Real-Time Deployment Logs and Build Output"
+sidebarTitle: "Deployment Logs"
+description: "Stream live build output during a deployment and access persisted logs for completed or failed builds via the dashboard or API."
+---
+
+Every deployment on Deploy Your App produces a full build log that is streamed to the dashboard in real time and persisted to the database when the deployment completes. Logs are delivered via **Server-Sent Events (SSE)** backed by a Redis pub/sub channel keyed by `deploymentId`. The builder worker publishes log chunks to the channel as it progresses through each build stage, and the browser subscribes to the stream through the API, rendering each line as it arrives.
+
+<Note>
+  Environment variable values are automatically replaced with `[REDACTED]` in all log output before lines are stored or streamed to the dashboard. This prevents secrets from being exposed in build logs, even if a command echoes variable values to stdout.
+</Note>
+
+---
+
+## Live log streaming
+
+During an active deployment, the build worker publishes log lines to a Redis channel named `logs:{deploymentId}`. The dashboard subscribes to this channel through the `GET /api/v1/deployments/:id/logs` endpoint, which returns an SSE stream:
+
+```
+Content-Type: text/event-stream
+Cache-Control: no-cache, no-transform
+Connection: keep-alive
+```
+
+Each event payload has the shape `{ "text": "<log line>" }`. The stream stays open until the client disconnects (e.g. navigating away) or the deployment completes. The Redis subscriber is cleaned up automatically when the request's `AbortSignal` fires.
+
+---
+
+## Log retention and persistence
+
+When a deployment finishes — whether with `SUCCESS` or `FAILED` status — the builder writes the full accumulated log to the `logs` field of the `Deployment` record in PostgreSQL. You can access the stored logs at any time from the deployment detail page or via the API, even after the live stream has ended.
+
+The `Deployment` schema stores:
+
+| Field | Description |
+|---|---|
+| `status` | One of `PENDING`, `CLONING`, `DETECTING`, `ALLOCATING`, `BUILDING`, `DEPLOYING`, `SUCCESS`, `FAILED` |
+| `logs` | Full log output as a single string, written on completion |
+| `error` | Short error message if the deployment failed |
+| `commitHash` | Git commit SHA that was deployed |
+| `completedAt` | Timestamp when the deployment finished |
+
+---
+
+## Accessing logs
+
+### Dashboard
+
+Click any deployment in the project's deployment history to open the deployment detail view. If the deployment is still running, the log panel streams live output. For completed deployments, the stored log is rendered in full.
+
+### Deployment build logs (API)
+
+Retrieve the live or stored logs for a specific deployment:
+
+```
+GET /api/v1/deployments/:id/logs
+```
+
+The endpoint subscribes to the Redis channel `logs:{id}` and returns an SSE stream. For deployments that have already completed, the channel will be empty and the stream will stay open until you close it — fetch the stored `logs` field from the deployment record via `GET /api/v1/deployments/:id` instead for completed builds.
+
+### Server logs (container stdout/stderr)
+
+For **runtime** debugging after a successful deployment, use the server logs endpoint:
+
+```
+GET /api/v1/projects/:id/server-logs
+```
+
+This endpoint streams live stdout and stderr from the running Docker container using `docker logs -f --tail 100 <containerId>`. It also uses Redis pub/sub (channel `server-logs:{containerId}`) with a distributed lock (`active-logger:{containerId}`) to ensure only one process runs `docker logs` at a time, even if multiple browser tabs subscribe simultaneously.
+
+<Tip>
+  If your application deployed successfully but is crashing or behaving unexpectedly at runtime, use the **Server Logs** tab on the project page rather than the deployment logs. Server logs show live container output — including application errors, uncaught exceptions, and framework startup messages — from the moment the container started.
+</Tip>
+
+---
+
+## Reading build stages in logs
+
+The builder prefixes platform-level events with `[SYSTEM]` to distinguish them from raw tool output. You can use these markers to understand which stage a deployment is in or where a failure occurred.
+
+| Log line | What it means |
+|---|---|
+| `[SYSTEM] Starting deployment...` | The worker has picked up the job and is beginning the build |
+| `[SYSTEM] Cloning repository...` | Git clone in progress |
+| `[SYSTEM] Repository cloned` | Repository successfully cloned to the build workspace |
+| `[SYSTEM] Detecting framework...` | The builder is scanning the project to identify Next.js, Vite, or Node.js |
+| `[SYSTEM] Dockerfile prepared (nextjs)` | A Dockerfile was generated for the detected framework |
+| `[SYSTEM] Dockerfile prepared (vite)` | A Dockerfile was generated for a Vite project |
+| `[SYSTEM] Dockerfile prepared (node)` | A Dockerfile was generated for a Node.js project |
+| `[SYSTEM] Build completed` | The Docker image build finished successfully |
+| `[SYSTEM] Container started (abc1234)` | The container is running; the value in parentheses is the container ID |
+| `[SYSTEM] Deployment successful` | The deployment is live and the URL has been assigned |
+| `[SYSTEM] ERROR: <message>` | A fatal error occurred; the deployment is marked `FAILED` |
+
+Lines without a `[SYSTEM]` prefix are raw output from `git`, `npm`, `docker build`, or your build command. Build errors from `npm run build`, missing dependencies, or TypeScript compilation failures appear inline in this output.
+
+---
+
+## Common log patterns
+
+**Checking which framework was detected**
+
+Look for a `[SYSTEM] Dockerfile prepared (...)` line early in the log. The value in parentheses tells you which Dockerfile template was chosen (`nextjs`, `vite`, or `node`).
+
+**Finding build errors**
+
+Scroll to the first `[SYSTEM] ERROR:` line or the last output before the log ends. `npm`/`yarn` build failures output their error immediately before the builder emits the `[SYSTEM] ERROR:` marker.
+
+**Verifying environment variables were injected**
+
+The builder writes `[SYSTEM] Writing .env file` before the Docker build step. Any env var keys (not values) may appear in this line. Values are always shown as `[REDACTED]`.

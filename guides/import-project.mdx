@@ -1,0 +1,94 @@
+---
+title: "Import a GitHub Repository and Deploy Your First Project"
+sidebarTitle: "Import Project"
+description: "Connect a GitHub repository, configure your build settings, and trigger your first deployment on Deploy Your App in just a few steps."
+---
+
+Importing a project is the starting point for every deployment on Deploy Your App. The platform fetches your GitHub repositories, lets you configure project settings, and then creates a `Project` record alongside an initial `Deployment` record — all in a single database transaction. A GitHub webhook is registered automatically so every subsequent push to your production branch triggers a new deployment without any manual action.
+
+<Warning>
+  Your GitHub account must be connected via OAuth before you can import a project. If you haven't done so, head to **Dashboard → Settings → Integrations** and authorize the GitHub OAuth app first. The import API looks for a valid GitHub access token on your account; without it, the request returns `401 Unauthorized`.
+</Warning>
+
+## Steps
+
+<Steps>
+  <Step title="Navigate to the Import page">
+    In the dashboard, click **New Project** or go directly to `/dashboard/import`. The page is split into two panels: a searchable list of your GitHub repositories on the left, and a project configuration form on the right.
+  </Step>
+
+  <Step title="Browse and select a repository">
+    The dashboard fetches your repositories from `GET /api/v1/repository` using paginated requests (30 repos per page). Use the search bar to filter by repository name or full name (e.g. `owner/repo`). Click the **Import** button next to the repository you want to deploy.
+
+    Once you select a repository, the configuration form appears on the right panel. The **Project Name** and **Production Branch** fields are pre-filled from the repository's metadata.
+  </Step>
+
+  <Step title="Fill in the project configuration">
+    Configure the following fields in the form:
+
+    | Field | Required | Default | Example |
+    |---|---|---|---|
+    | **Project Name** | ✅ Yes | Repository name | `my-awesome-app` |
+    | **Production Branch** | ✅ Yes | `main` (or repo default) | `main` |
+    | **Build Command** | No | Auto-detected | `npm run build` |
+    | **Start Command** | No | Auto-detected | `node dist/index.js` |
+    | **Root Directory** | No | Repository root (`./`) | `apps/web` |
+    | **Environment Variables** | No | — | `DATABASE_URL=postgres://...` |
+
+    The **Build Command**, **Start Command**, **Root Directory**, and **Environment Variables** fields are grouped under **Advanced Settings** and collapsed by default. Click **Advanced Settings** to expand them.
+
+    <Tip>
+      If your repository is a monorepo, set the **Root Directory** to the subdirectory containing your application (e.g. `apps/web`). The builder will `cd` into this path before detecting the framework and running your build command. For example, in a Turborepo monorepo with a Next.js app at `apps/web`, set Root Directory to `apps/web`.
+    </Tip>
+
+    Environment variables added here are encrypted with AES-256-GCM before being stored. See [Manage Environment Variables](/guides/environment-variables) for full details on how encryption works.
+  </Step>
+
+  <Step title="Click Deploy">
+    Click the **Deploy** button to submit the form. The dashboard calls `POST /api/v1/projects/import` with the following payload:
+
+    ```json
+    {
+      "repositoryFullName": "owner/repo-name",
+      "name": "my-awesome-app",
+      "defaultBranch": "main",
+      "buildCommand": "npm run build",
+      "startCommand": "node dist/index.js",
+      "rootDirectory": "apps/web",
+      "envs": [
+        { "key": "DATABASE_URL", "value": "postgres://..." }
+      ]
+    }
+    ```
+
+    The API handler performs the following actions in order:
+
+    1. **Validates the session** — checks that the request comes from an authenticated user with a linked GitHub account.
+    2. **Creates project and deployment atomically** — runs a `prisma.$transaction` that creates both the `Project` record and an initial `Deployment` record in a single database transaction. Any environment variables are encrypted and stored as `Env` records linked to the project.
+    3. **Registers a GitHub webhook** — calls the GitHub API to create a webhook on the repository that fires on `push` events. The webhook payload is delivered to your platform's webhook endpoint and triggers automated deployments on every push.
+    4. **Enqueues the first build job** — adds a `deployment-event` job to the deployment queue, passing the project configuration, branch, environment variables, and deployment ID to the builder worker.
+
+    <Note>
+      The GitHub webhook is registered automatically during import. From this point on, every push to your **Production Branch** will trigger a new deployment with no further configuration required. You can still trigger manual redeployments at any time from the project dashboard by calling `POST /api/v1/projects/:id/deploy`.
+    </Note>
+  </Step>
+
+  <Step title="Watch deployment progress in real time">
+    After submitting the form, you are redirected to the **Projects** page. Click your new project to open the project detail view, then click the deployment to open the log stream. Build output is streamed live as the worker clones the repository, detects the framework, builds the Docker image, and starts the container.
+
+    Log lines prefixed with `[SYSTEM]` indicate platform-level events (e.g. `[SYSTEM] Repository cloned`, `[SYSTEM] Dockerfile prepared (nextjs)`). Raw Docker and git output appears without a prefix. See [View Deployment Logs](/guides/deployment-logs) for a full breakdown of build stages.
+  </Step>
+</Steps>
+
+---
+
+## Learn more
+
+<CardGroup cols={2}>
+  <Card title="Environment Variables" icon="shield-halved" href="/guides/environment-variables">
+    Add, update, and delete AES-encrypted environment variables for your project, and understand how they are injected into the Docker build context.
+  </Card>
+  <Card title="Build Commands Reference" icon="terminal" href="/configuration/build-commands">
+    Learn how the platform auto-detects Next.js, Vite, and Node.js projects and what build and start commands are used by default.
+  </Card>
+</CardGroup>

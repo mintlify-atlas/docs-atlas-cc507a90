@@ -1,0 +1,251 @@
+---
+title: "Self-Host Deploy Your App on Your Own Infrastructure"
+sidebarTitle: "Self-Hosting"
+description: "Run the full Deploy Your App platform on your own server using Docker Compose, Bun, and a single domain — no third-party PaaS required."
+---
+
+Deploy Your App is designed to run entirely on infrastructure you control. This guide walks through cloning the repository, configuring all required environment variables, starting the backing services, and running every application process — either in development mode or in production via PM2.
+
+## Prerequisites
+
+Before you begin, make sure you have the following available on your server:
+
+- **Docker & Docker Compose** — used to run PostgreSQL 16, Redis 7, and Caddy
+- **Bun 1.3+** (or Node.js 20+) — the primary runtime and package manager
+- **A domain name** with DNS pointing to your server (a wildcard `A` record, e.g. `*.yourdomain.com`, is recommended for subdomain routing)
+- **Cloudflare R2 bucket** — required for hosting static site deployments (Vite, Next.js static export)
+- **GitHub OAuth App** — required for user sign-in and repository access
+
+<Warning>
+  You **must** set `MASTER_ENCRYPTION_KEY` before starting any service for the first time. This key is used to encrypt all project environment variables stored in the database. If you change it after data exists, previously stored secrets will become unreadable. Generate a strong random key and treat it like a root password.
+
+  ```bash
+  openssl rand -hex 32
+  ```
+</Warning>
+
+## Setup
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone the monorepo and move into the project directory:
+
+    ```bash
+    git clone https://github.com/nayalsaurav/deploy-your-app.git
+    cd deploy-your-app
+    ```
+  </Step>
+
+  <Step title="Install Dependencies">
+    Install all workspace dependencies from the monorepo root:
+
+    <CodeGroup>
+      ```bash Bun (recommended)
+      bun install
+      ```
+
+      ```bash pnpm
+      pnpm install
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Configure Environment Variables">
+    Each service reads its configuration from environment variables. Create `.env` files in the relevant app directories as shown below.
+
+    #### Web App (`apps/web/.env`)
+
+    ```env
+    # PostgreSQL connection string (matches docker-compose.yml defaults)
+    DATABASE_URL="postgresql://postgres:postgres@localhost:5432/mydb"
+
+    # better-auth secret — generate with: openssl rand -hex 32
+    BETTER_AUTH_SECRET="your-secret-here"
+
+    # Public URL of the web dashboard (used for OAuth callbacks)
+    BETTER_AUTH_URL="https://yourdomain.com"
+
+    # GitHub OAuth App credentials
+    GITHUB_CLIENT_ID="your-github-client-id"
+    GITHUB_CLIENT_SECRET="your-github-client-secret"
+
+    # AES encryption key for project environment variables
+    MASTER_ENCRYPTION_KEY="your-32-byte-hex-key"
+
+    # Base domain for generated project subdomains
+    NEXT_PUBLIC_BASE_DOMAIN="yourdomain.com"
+    ```
+
+    #### Builder Service (`apps/builder/.env`)
+
+    ```env
+    # Redis connection (matches docker-compose.yml defaults)
+    REDIS_HOST="localhost"
+    REDIS_PORT="6379"
+
+    # Cloudflare R2 credentials for static site uploads
+    R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
+    R2_ACCESS_KEY_ID="your-r2-access-key-id"
+    R2_SECRET_ACCESS_KEY="your-r2-secret-access-key"
+    R2_BUCKET_NAME="your-r2-bucket-name"
+
+    # Base domain appended to generated project subdomains
+    BASE_DOMAIN="yourdomain.com"
+
+    # Number of concurrent build jobs (default: 1)
+    WORKER_CONCURRENCY="2"
+    ```
+
+    #### API Service (`apps/api/.env`)
+
+    ```env
+    # Port the Express server binds to (PM2 sets this to 8080)
+    PORT="8080"
+
+    # GitHub webhook secret for validating push event payloads
+    GITHUB_WEBHOOK_SECRET="your-webhook-secret"
+
+    # Must match the value set in the web app
+    MASTER_ENCRYPTION_KEY="your-32-byte-hex-key"
+
+    DATABASE_URL="postgresql://postgres:postgres@localhost:5432/mydb"
+
+    REDIS_HOST="localhost"
+    REDIS_PORT="6379"
+    ```
+
+    #### Notification Service (`apps/nortification/.env`)
+
+    ```env
+    REDIS_HOST="localhost"
+    REDIS_PORT="6379"
+
+    # Resend API key for transactional email
+    RESEND_API_KEY="re_..."
+
+    # Optional: Slack incoming webhook URL
+    SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
+
+    # Optional: Discord webhook URL
+    DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+
+    # Optional: Twilio credentials for WhatsApp notifications
+    TWILIO_ACCOUNT_SID="AC..."
+    TWILIO_AUTH_TOKEN="your-twilio-auth-token"
+    TWILIO_WHATSAPP_FROM="whatsapp:+14155238886"
+    ```
+
+    <Note>
+      **GitHub OAuth App setup:** Create a new OAuth App at [github.com/settings/developers](https://github.com/settings/developers). Set the **Authorization callback URL** to:
+
+      ```
+      {BETTER_AUTH_URL}/api/auth/callback/github
+      ```
+
+      For example: `https://yourdomain.com/api/auth/callback/github`. Copy the **Client ID** and **Client Secret** into your `apps/web/.env`.
+    </Note>
+  </Step>
+
+  <Step title="Start Infrastructure Services">
+    Start PostgreSQL 16, Redis 7, and Caddy using Docker Compose:
+
+    <CodeGroup>
+      ```bash Bun script
+      bun run docker:up
+      ```
+
+      ```bash Docker Compose directly
+      docker compose up -d
+      ```
+    </CodeGroup>
+
+    This starts three containers:
+
+    | Container | Image | Port |
+    |---|---|---|
+    | `turbo-postgres` | `postgres:16` | `5432` |
+    | `turbo-redis` | `redis:7` | `6379` |
+    | `caddy-proxy` | `caddy:latest` | `80`, `443` |
+
+    Caddy reads its configuration from `Caddyfile` at the project root and proxies all traffic on ports 80 and 443 to the proxy service running on `host.docker.internal:8000`:
+
+    ```caddy
+    {
+        local_certs
+    }
+
+    :80, :443 {
+        tls internal
+
+        reverse_proxy host.docker.internal:8000
+    }
+    ```
+
+    For production, replace `tls internal` with your domain name to enable automatic Let's Encrypt certificates.
+  </Step>
+
+  <Step title="Run Database Migrations">
+    Apply the Prisma schema to your PostgreSQL instance:
+
+    ```bash
+    cd packages/database
+    bun run prisma migrate deploy
+    ```
+
+    This creates all required tables (users, accounts, projects, deployments, environment variables, etc.) in the `mydb` database.
+  </Step>
+
+  <Step title="Start All Services">
+    #### Development Mode
+
+    From the monorepo root, start all services with hot-reloading:
+
+    ```bash
+    bun run dev
+    ```
+
+    This runs `bun run docker:up && turbo dev`, starting the infrastructure and all app dev servers concurrently via TurboRepo.
+
+    #### Production Mode (PM2)
+
+    For production deployments, use the included PM2 configuration. PM2 manages all six services as named processes:
+
+    ```bash
+    pm2 start ecosystem.config.cjs
+    ```
+
+    The `ecosystem.config.cjs` file defines the following processes:
+
+    | PM2 Name | Directory | Port |
+    |---|---|---|
+    | `web` | `apps/web` | `3000` |
+    | `api` | `apps/api` | `8080` |
+    | `builder` | `apps/builder` | — |
+    | `proxy` | `apps/proxy` | `8000` |
+    | `worker` | `apps/worker` | — |
+    | `nortification` | `apps/nortification` | — |
+
+    Useful PM2 commands for managing your deployment:
+
+    ```bash
+    pm2 list                    # View all process statuses
+    pm2 logs                    # Stream logs from all processes
+    pm2 logs web                # Stream logs from a specific process
+    pm2 restart all             # Restart all processes
+    pm2 save                    # Persist process list across reboots
+    pm2 startup                 # Generate a system startup script
+    ```
+  </Step>
+</Steps>
+
+## Verifying Your Installation
+
+Once all services are running, open your browser and navigate to your domain. You should see the Deploy Your App landing page. Click **Sign in with GitHub** to authorize and reach the dashboard. If the OAuth callback fails, double-check that `BETTER_AUTH_URL` and the GitHub OAuth callback URL match exactly.
+
+To stop all infrastructure containers:
+
+```bash
+bun run docker:down
+# or
+docker compose down
+```

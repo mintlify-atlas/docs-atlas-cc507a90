@@ -1,0 +1,116 @@
+{
+  "projectType": "saas",
+  "projectName": "Deploy Your App",
+  "projectDescription": "A self-hostable PaaS platform that automatically detects, builds, and deploys Next.js, Vite, and Node.js applications from GitHub repositories using Docker containers and Cloudflare R2 storage.",
+  "theme": "luma",
+  "primaryColor": "#7C3AED",
+  "lightColor": "#A78BFA",
+  "darkColor": "#4C1D95",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "self-hosting"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/build-system",
+              "concepts/deployment-pipeline"
+            ]
+          },
+          {
+            "group": "Using the Platform",
+            "pages": [
+              "guides/import-project",
+              "guides/environment-variables",
+              "guides/custom-domains",
+              "guides/deployment-logs"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/build-commands",
+              "configuration/environment-variables-reference",
+              "configuration/notifications"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api-reference/overview",
+              "api-reference/authentication"
+            ]
+          },
+          {
+            "group": "Projects",
+            "pages": [
+              "api-reference/projects/list",
+              "api-reference/projects/get",
+              "api-reference/projects/update",
+              "api-reference/projects/delete",
+              "api-reference/projects/import",
+              "api-reference/projects/deploy"
+            ]
+          },
+          {
+            "group": "Deployments",
+            "pages": [
+              "api-reference/deployments/list",
+              "api-reference/deployments/get",
+              "api-reference/deployments/logs"
+            ]
+          },
+          {
+            "group": "Webhooks",
+            "pages": [
+              "api-reference/webhooks/github"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Automatic framework detection (Next.js, Vite, Node.js) with zero configuration",
+    "GitHub OAuth integration with automatic webhook registration for CI/CD",
+    "Docker-based container isolation for every deployment",
+    "Hybrid deployment engine: static assets to Cloudflare R2, dynamic apps as containers",
+    "Real-time deployment logs streamed via Redis pub/sub",
+    "Custom domain support with CNAME-based DNS verification",
+    "Encrypted environment variables (AES encryption)",
+    "BullMQ job queue system with worker/builder/dispatcher microservices",
+    "Multi-channel notifications (Email via Resend, Slack, Discord, WhatsApp via Twilio)",
+    "Caddy reverse proxy with automatic TLS/SSL termination"
+  ],
+  "publicApiSurface": [
+    "GET /api/v1/projects — List all projects for authenticated user",
+    "POST /api/v1/projects/import — Import a GitHub repository as a new project",
+    "GET /api/v1/projects/:id — Get a single project with deployments",
+    "PATCH /api/v1/projects/:id — Update project name, build config, custom domain",
+    "DELETE /api/v1/projects/:id — Delete a project",
+    "POST /api/v1/projects/:id/deploy — Manually trigger a new deployment",
+    "POST /api/v1/projects/:id/envs — Add or update an environment variable",
+    "DELETE /api/v1/projects/:id/envs?envId= — Delete an environment variable",
+    "POST /api/v1/projects/:id/domain/verify — Verify custom domain CNAME",
+    "GET /api/v1/deployments — List recent deployments across all projects",
+    "GET /api/v1/deployments/:id — Get a specific deployment",
+    "GET /api/v1/deployments/:id/logs — Get deployment logs",
+    "GET /api/v1/repository — List GitHub repositories for the authenticated user",
+    "POST /webhook/:projectId — GitHub webhook endpoint for push events"
+  ]
+}

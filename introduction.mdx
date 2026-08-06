@@ -1,0 +1,91 @@
+---
+title: "Deploy Your App: Self-Hosted PaaS for Web Developers"
+sidebarTitle: "Introduction"
+description: "Deploy Your App is a self-hostable PaaS that auto-detects Next.js, Vite, and Node.js apps from GitHub and deploys them using Docker containers and Cloudflare R2."
+---
+
+Deploy Your App is an open-source, self-hostable Platform-as-a-Service that takes your GitHub repository and turns it into a running application — automatically. It detects your framework, builds a Docker image, and either runs your app as an isolated container or uploads static assets to Cloudflare R2, giving you a Vercel-like developer experience on infrastructure you fully control.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Intelligent Build System" icon="wand-magic-sparkles">
+    Automatically detects your framework — Next.js, Vite, or Node.js — and selects the right build strategy with zero configuration required.
+  </Card>
+  <Card title="Automated CI/CD Pipeline" icon="circle-check">
+    From a GitHub push to a live deployment with zero manual steps. The platform builds, tests, and deploys instantly on every commit.
+  </Card>
+  <Card title="Docker-Based Isolation" icon="box">
+    Every deployment runs in its own isolated container, ensuring consistency between environments and preventing dependency conflicts.
+  </Card>
+  <Card title="Dynamic Reverse Proxy" icon="arrow-right-arrow-left">
+    Smart subdomain-based routing with real-time updates powered by Caddy and a custom proxy service — no manual Nginx rewrites needed.
+  </Card>
+  <Card title="Hybrid Deployment Engine" icon="layer-group">
+    Static apps (Vite, Next.js static export) are served via Cloudflare R2 for maximum performance. Dynamic apps run as long-lived containers.
+  </Card>
+  <Card title="Encrypted Environment Variables" icon="lock">
+    Secrets are encrypted at rest using your `MASTER_ENCRYPTION_KEY` before being stored in the database. They are decrypted only at build and runtime.
+  </Card>
+  <Card title="Real-Time Deployment Logs" icon="terminal">
+    Track every step of your deployment — clone, build, push, and run — with live log streaming and status updates on the dashboard.
+  </Card>
+  <Card title="Multi-Channel Notifications" icon="bell">
+    Receive deployment alerts over email (Resend), Slack, Discord, or WhatsApp (Twilio) through the dedicated notification microservice.
+  </Card>
+</CardGroup>
+
+## Architecture Overview
+
+Deploy Your App is structured as a **TurboRepo monorepo** composed of six independent services that communicate via HTTP and a shared BullMQ job queue backed by Redis.
+
+| Service | Technology | Responsibility |
+|---|---|---|
+| `web` | Next.js | Dashboard UI — import repos, view deployments, manage env vars |
+| `api` | Express + Bun | REST API, GitHub webhook receiver, job producer |
+| `builder` | Bun + Docker SDK | Clones repos, runs builds, pushes images or uploads to R2 |
+| `worker` | BullMQ | Job dispatcher — routes build and deployment events from the queue |
+| `nortification` | Bun + BullMQ | Notification microservice for email, Slack, Discord, and WhatsApp |
+| `proxy` | Express + http-proxy | Dynamic reverse proxy — routes subdomain traffic to running containers |
+
+Infrastructure is managed via a single `docker-compose.yml` that starts **PostgreSQL 16**, **Redis 7**, and a **Caddy** reverse proxy for TLS termination.
+
+```
+├── apps/
+│   ├── api/            # Express REST API & webhook handler
+│   ├── builder/        # Docker build & deploy worker
+│   ├── nortification/  # Notification microservice
+│   ├── proxy/          # Dynamic reverse proxy (port 8000)
+│   ├── web/            # Next.js dashboard (port 3000)
+│   └── worker/         # BullMQ job dispatcher
+├── packages/
+│   ├── database/       # Prisma schema, client, and migrations
+│   ├── queue/          # Shared BullMQ queue definitions
+│   └── ui/             # Shared shadcn/ui component library
+├── docker-compose.yml  # PostgreSQL 16, Redis 7, Caddy
+├── ecosystem.config.cjs # PM2 process configuration
+└── Caddyfile           # Caddy TLS and proxy rules
+```
+
+## Tech Stack
+
+- **Frontend:** Next.js 15, React, shadcn/ui, Tailwind CSS
+- **Backend:** Bun, Express, BullMQ
+- **Database:** PostgreSQL 16 via Prisma ORM
+- **Queue:** BullMQ + Redis 7
+- **Auth:** better-auth with GitHub OAuth
+- **Infrastructure:** Docker, Docker Compose, Caddy
+- **Storage:** Cloudflare R2 (static site hosting)
+- **Monorepo:** TurboRepo with Bun workspaces
+- **Process Manager:** PM2 (`ecosystem.config.cjs`)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Deploy your first application in under 5 minutes using an existing Deploy Your App instance.
+  </Card>
+  <Card title="Self-Hosting" icon="server" href="/self-hosting">
+    Run the full platform on your own server with Docker Compose and a single domain name.
+  </Card>
+</CardGroup>

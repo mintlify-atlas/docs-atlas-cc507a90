@@ -1,0 +1,256 @@
+---
+title: "POST /api/v1/projects/import — Import a GitHub Repository"
+sidebarTitle: "Import Project"
+description: "Create a new project from a GitHub repository and immediately trigger the first deployment. Registers a webhook and encrypts all supplied environment variables."
+---
+
+The Import Project endpoint is the starting point for every new application on the platform. It creates a project record linked to a GitHub repository, optionally stores encrypted environment variables, registers a GitHub webhook so future pushes automatically trigger deployments, and then queues an initial deployment against the specified default branch — all in a single atomic request.
+
+**`POST /api/v1/projects/import`**
+
+## Authentication
+
+<Note>
+  This endpoint requires an active session and a connected GitHub account. Your GitHub OAuth access token is retrieved from the database and used to register the webhook on your behalf. See [Authentication](/api-reference/authentication) for details on obtaining a session token.
+</Note>
+
+## Request
+
+### Body Parameters
+
+<ParamField body="repositoryFullName" type="string" required>
+  Full GitHub repository identifier in `owner/repo` format, e.g. `"acme/my-nextjs-app"`. This must be a repository the authenticated GitHub account has access to.
+</ParamField>
+
+<ParamField body="defaultBranch" type="string" required>
+  The branch to use for production deployments and the initial build, e.g. `"main"` or `"production"`.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Human-readable display name for the project as it will appear in the dashboard.
+</ParamField>
+
+<ParamField body="buildCommand" type="string">
+  Custom build command to override auto-detection, e.g. `"npm run build"`. If omitted or `null`, the platform will detect the framework and choose an appropriate build command automatically.
+</ParamField>
+
+<ParamField body="startCommand" type="string">
+  Custom start command to override auto-detection, e.g. `"node dist/server.js"`. If omitted or `null`, auto-detection is used.
+</ParamField>
+
+<ParamField body="rootDirectory" type="string">
+  Path to the application root within the repository, e.g. `"apps/web"`. Defaults to the repository root if omitted.
+</ParamField>
+
+<ParamField body="envs" type="array">
+  List of environment variables to store with the project. Defaults to an empty array if omitted.
+
+  ```json
+  [
+    { "key": "DATABASE_URL", "value": "postgres://..." },
+    { "key": "API_SECRET",   "value": "s3cr3t" }
+  ]
+  ```
+
+  Each item must have:
+  - `key` (string) — environment variable name.
+  - `value` (string) — plaintext environment variable value (encrypted before storage — see note below).
+</ParamField>
+
+<Note>
+  **Webhook registration:** Upon successful project creation, the platform automatically registers a `push` event webhook in the GitHub repository using your OAuth access token. This webhook enables automatic deployments whenever commits are pushed to any tracked branch.
+</Note>
+
+<Note>
+  **Environment variable encryption:** All `value` fields in the `envs` array are encrypted using the platform's master encryption key before being written to the database. Values returned from subsequent API calls will be in their encrypted form. Never store plaintext secrets outside of this endpoint's request body.
+</Note>
+
+## Response
+
+A successful `200 OK` response returns both the newly created project and the initial deployment record:
+
+```json
+{
+  "project": Project,
+  "deployment": Deployment
+}
+```
+
+### Response Fields
+
+<ResponseField name="project" type="object">
+  The newly created project record.
+
+  <Expandable title="Project">
+    <ResponseField name="id" type="string">
+      Unique project identifier (cuid).
+    </ResponseField>
+
+    <ResponseField name="userId" type="string">
+      ID of the owning user.
+    </ResponseField>
+
+    <ResponseField name="name" type="string">
+      Display name supplied in the request.
+    </ResponseField>
+
+    <ResponseField name="repositoryFullName" type="string">
+      Full GitHub repository path as supplied.
+    </ResponseField>
+
+    <ResponseField name="defaultBranch" type="string">
+      Default branch as supplied.
+    </ResponseField>
+
+    <ResponseField name="buildCommand" type="string | null">
+      Custom build command, or `null`.
+    </ResponseField>
+
+    <ResponseField name="startCommand" type="string | null">
+      Custom start command, or `null`.
+    </ResponseField>
+
+    <ResponseField name="rootDirectory" type="string | null">
+      Application root path, or `null`.
+    </ResponseField>
+
+    <ResponseField name="deploymentUrl" type="string | null">
+      `null` immediately after creation; populated once the first deployment succeeds.
+    </ResponseField>
+
+    <ResponseField name="customDomain" type="string | null">
+      Always `null` at creation time.
+    </ResponseField>
+
+    <ResponseField name="customDomainVerified" type="boolean">
+      Always `false` at creation time.
+    </ResponseField>
+
+    <ResponseField name="createdAt" type="string">
+      ISO 8601 creation timestamp.
+    </ResponseField>
+
+    <ResponseField name="updatedAt" type="string">
+      ISO 8601 last-updated timestamp.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="deployment" type="object">
+  The initial deployment record that was queued immediately after project creation.
+
+  <Expandable title="Deployment">
+    <ResponseField name="id" type="string">
+      Unique deployment identifier (cuid).
+    </ResponseField>
+
+    <ResponseField name="projectId" type="string">
+      ID of the parent project.
+    </ResponseField>
+
+    <ResponseField name="branch" type="string">
+      The `defaultBranch` value from the request.
+    </ResponseField>
+
+    <ResponseField name="commitHash" type="string | null">
+      `null` initially; set once the repository is cloned.
+    </ResponseField>
+
+    <ResponseField name="status" type="DeploymentStatus">
+      Initial status is `PENDING`.
+    </ResponseField>
+
+    <ResponseField name="url" type="string | null">
+      `null` until the deployment succeeds.
+    </ResponseField>
+
+    <ResponseField name="port" type="integer | null">
+      `null` until a container port is allocated.
+    </ResponseField>
+
+    <ResponseField name="logs" type="string | null">
+      `null` initially; populated as the build progresses.
+    </ResponseField>
+
+    <ResponseField name="error" type="string | null">
+      `null` initially; populated if the deployment fails.
+    </ResponseField>
+
+    <ResponseField name="createdAt" type="string">
+      ISO 8601 creation timestamp.
+    </ResponseField>
+
+    <ResponseField name="updatedAt" type="string">
+      ISO 8601 last-updated timestamp.
+    </ResponseField>
+
+    <ResponseField name="completedAt" type="string | null">
+      `null` while in-progress; set when a terminal state is reached.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST https://your-domain.com/api/v1/projects/import \
+  -H 'Content-Type: application/json' \
+  -b 'better-auth.session_token=YOUR_SESSION_TOKEN' \
+  -d '{
+    "repositoryFullName": "acme/my-nextjs-app",
+    "defaultBranch": "main",
+    "name": "My Next.js App",
+    "buildCommand": null,
+    "startCommand": null,
+    "rootDirectory": null,
+    "envs": [
+      { "key": "DATABASE_URL", "value": "postgres://user:pass@host/db" },
+      { "key": "NEXT_PUBLIC_API_URL", "value": "https://api.example.com" }
+    ]
+  }'
+```
+
+**Example response:**
+
+```json
+{
+  "project": {
+    "id": "clx4z2k0e0000abc123def456",
+    "userId": "user_01hxyz",
+    "name": "My Next.js App",
+    "repositoryFullName": "acme/my-nextjs-app",
+    "defaultBranch": "main",
+    "buildCommand": null,
+    "startCommand": null,
+    "rootDirectory": null,
+    "deploymentUrl": null,
+    "customDomain": null,
+    "customDomainVerified": false,
+    "createdAt": "2024-06-01T12:00:00.000Z",
+    "updatedAt": "2024-06-01T12:00:00.000Z"
+  },
+  "deployment": {
+    "id": "clx5a3b1c0001xyz789ghi012",
+    "projectId": "clx4z2k0e0000abc123def456",
+    "branch": "main",
+    "commitHash": null,
+    "status": "PENDING",
+    "url": null,
+    "port": null,
+    "logs": null,
+    "error": null,
+    "createdAt": "2024-06-01T12:00:01.000Z",
+    "updatedAt": "2024-06-01T12:00:01.000Z",
+    "completedAt": null
+  }
+}
+```
+
+## Error Responses
+
+| Status | Error Message | Description |
+|--------|--------------|-------------|
+| `400` | `"Missing required fields"` | One or more of `repositoryFullName`, `defaultBranch`, or `name` were absent. |
+| `401` | `"Unauthorized"` | No valid session cookie was provided. |
+| `401` | `"No GitHub access token found"` | The authenticated user has not connected a GitHub account. |
+| `500` | `"Internal server error"` | An unexpected server-side error occurred (e.g. webhook registration failure). |

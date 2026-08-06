@@ -1,0 +1,178 @@
+---
+title: "Configure Deployment Notifications via Slack, Email, and More"
+sidebarTitle: "Notifications"
+description: "Set up deployment notifications with the built-in notification microservice — supports Email via Resend, Slack, Discord, and WhatsApp via Twilio."
+---
+
+Deploy Your App ships with a dedicated notification microservice (`apps/nortification`) that listens on the `notification-queue` BullMQ queue (using the `launchdrop` queue prefix). When a notification job is dequeued, the service reads the job's `type` field and dispatches the message through the matching provider. Four channels are supported out of the box: **Email** via Resend, **Slack** via Incoming Webhooks, **Discord** via channel webhooks, and **WhatsApp** via Twilio. Every channel is opt-in — configure only the ones you need.
+
+## Supported Channels
+
+| Channel | Provider | Required Environment Variable(s) |
+|---------|----------|------------------------------------|
+| Email | Resend | `RESEND_API_KEY` |
+| Slack | Slack Incoming Webhooks | `SLACK_WEBHOOK_URL` |
+| Discord | Discord Webhooks | `DISCORD_WEBHOOK_URL` |
+| WhatsApp | Twilio | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` |
+
+## Email Setup (Resend)
+
+Resend is a developer-focused email API that works without complex SMTP configuration.
+
+1. Create an account at [resend.com](https://resend.com) and verify your sending domain.
+2. Generate an API key from the Resend dashboard (**API Keys → Create API Key**).
+3. Set the key in your notification service environment:
+
+```bash
+RESEND_API_KEY="re_your_api_key_here"
+```
+
+4. Restart the notification service. The service will now send emails when jobs of `type: "email"` arrive in the queue.
+
+The `from` address in the current implementation defaults to `Acme <onboarding@resend.dev>`, which is Resend's shared testing address. For production deployments, update the `from` field in `apps/nortification/src/services/notification.service.ts` to a verified sending address on your domain:
+
+```typescript
+from: "Deploy Your App <deployments@yourdomain.com>",
+```
+
+**Email job payload shape:**
+
+```json
+{
+  "type": "email",
+  "payload": {
+    "to": "user@example.com",
+    "subject": "Deployment succeeded",
+    "html": "<p>Your app <strong>my-app</strong> was deployed successfully.</p>"
+  }
+}
+```
+
+## Slack Setup
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) and create a new Slack App (or use an existing one).
+2. Under **Features → Incoming Webhooks**, enable incoming webhooks and click **Add New Webhook to Workspace**.
+3. Choose the channel you want notifications posted to, then copy the generated webhook URL.
+4. Set it in your notification service environment:
+
+```bash
+SLACK_WEBHOOK_URL="https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+```
+
+5. Restart the notification service.
+
+When a Slack notification job is processed, the service calls `slackWebhook.send({ text: message })` using the `@slack/webhook` package. The message appears in your chosen channel as a standard bot post.
+
+**Slack job payload shape:**
+
+```json
+{
+  "type": "slack",
+  "payload": {
+    "message": "Deployment succeeded for my-app"
+  }
+}
+```
+
+## Discord Setup
+
+1. Open your Discord server and go to **Server Settings → Integrations → Webhooks**.
+2. Click **New Webhook**, give it a name and select the channel, then click **Copy Webhook URL**.
+3. Set it in your notification service environment:
+
+```bash
+DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/1234567890/your-webhook-token"
+```
+
+4. Restart the notification service.
+
+The service sends a `POST` request to the webhook URL with the body `{ "content": message }`, which posts a plain text message to the Discord channel.
+
+**Discord job payload shape:**
+
+```json
+{
+  "type": "discord",
+  "payload": {
+    "message": "Deployment succeeded for my-app"
+  }
+}
+```
+
+## WhatsApp Setup (Twilio)
+
+WhatsApp notifications are sent through the [Twilio Messaging API](https://www.twilio.com/docs/whatsapp). You need either a Twilio WhatsApp Sandbox (for testing) or a Twilio-approved WhatsApp-enabled number (for production).
+
+1. Sign in to the [Twilio Console](https://console.twilio.com) and note your **Account SID** and **Auth Token** from the dashboard homepage.
+2. For the sender number, use the Twilio WhatsApp Sandbox number `whatsapp:+14155238886` during development, or your approved business number for production.
+3. Set all three variables in your notification service environment:
+
+```bash
+TWILIO_ACCOUNT_SID="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+TWILIO_AUTH_TOKEN="your_auth_token"
+TWILIO_WHATSAPP_FROM="whatsapp:+14155238886"
+```
+
+4. Restart the notification service.
+
+The service calls `twilioClient.messages.create({ body, from, to: \`whatsapp:${toPhoneNumber}\` })`. The recipient number must be opted in to your WhatsApp Sandbox or approved sender.
+
+**WhatsApp job payload shape:**
+
+```json
+{
+  "type": "whatsapp",
+  "payload": {
+    "to": "+19876543210",
+    "message": "Deployment succeeded for my-app"
+  }
+}
+```
+
+## Enqueueing Custom Notifications
+
+You can enqueue notification jobs directly from any service that has access to the same Redis instance — useful for sending alerts from custom scripts or CI pipelines.
+
+```typescript
+import { Queue } from "bullmq"
+
+const notificationQueue = new Queue("notification-queue", {
+  connection: { host: "localhost", port: 6379 },
+  prefix: "launchdrop",
+})
+
+// Send a Slack alert
+await notificationQueue.add("notify", {
+  type: "slack",
+  payload: {
+    message: "Production deployment failed for my-app — check logs.",
+  },
+})
+
+// Send an email
+await notificationQueue.add("notify", {
+  type: "email",
+  payload: {
+    to: "team@yourdomain.com",
+    subject: "Deployment failed",
+    html: "<p>The deployment for <strong>my-app</strong> failed.</p>",
+  },
+})
+```
+
+The `NotificationJobData` interface consumed by the worker is:
+
+```typescript
+interface NotificationJobData {
+  type: "email" | "discord" | "slack" | "whatsapp"
+  payload: any
+}
+```
+
+<Note>
+  All notification channels are completely optional. If a channel's environment variables are not set, the service logs a warning (e.g. `SLACK_WEBHOOK_URL not configured. Skipping Slack.`) and continues processing other jobs without throwing an error. There is no need to set up channels you do not plan to use.
+</Note>
+
+<Note>
+  The `notification-queue` uses the BullMQ queue prefix `launchdrop`. When connecting an external producer, ensure you pass `{ prefix: "launchdrop" }` in the `Queue` options so that job keys align with what the notification worker is subscribed to.
+</Note>

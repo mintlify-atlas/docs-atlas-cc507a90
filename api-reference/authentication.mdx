@@ -1,0 +1,127 @@
+---
+title: "Authenticate with Deploy Your App API via GitHub OAuth"
+sidebarTitle: "Authentication"
+description: "Deploy Your App uses GitHub OAuth and better-auth session cookies to authenticate all /api/v1/ API requests — no API keys or Bearer tokens required."
+---
+
+Deploy Your App uses session-based authentication powered by [`better-auth`](https://better-auth.dev) with GitHub as the sole OAuth provider. Every `/api/v1/` endpoint calls `getSession()` internally and returns a `401 Unauthorized` response immediately if no valid session is found — there is no public or unauthenticated surface in the API.
+
+## How Authentication Works
+
+The full OAuth flow, from browser click to authenticated API access, proceeds as follows:
+
+1. The user opens the web dashboard and clicks **Sign in with GitHub**.
+2. The browser is redirected to GitHub's authorization page, where the user grants the requested OAuth scopes (`read:user`, `user:email`, `repo`, `write:repo_hook`).
+3. GitHub redirects back to `{BETTER_AUTH_URL}/api/auth/callback/github` with a temporary authorization code.
+4. The `better-auth` library exchanges the code for an access token, creates a user session in PostgreSQL via Prisma, and sets an **HTTP-only session cookie** on the response.
+5. Every subsequent request to `/api/v1/` includes that cookie automatically, and the server validates it on each call via `auth.api.getSession()`.
+
+The Next.js route handler at `/api/auth/[...all]` proxies all `better-auth` requests — including sign-in, sign-out, and session retrieval — to the `better-auth` core handler using `toNextJsHandler(auth)`.
+
+## Using the API from a Browser
+
+When you are signed in through the dashboard, authentication is fully transparent:
+
+- The session cookie is set automatically by `better-auth` after the OAuth callback.
+- The `authClient` (created with `createAuthClient`) is configured with `baseURL: NEXT_PUBLIC_APP_URL`, so all client-side requests target the correct origin.
+- Fetch calls made from dashboard components automatically include the session cookie because they share the same origin.
+
+No extra headers or tokens need to be attached to dashboard API calls.
+
+## Using the API Programmatically
+
+There is no dedicated API key mechanism. To call the API from a script or tool like `curl`, you must first complete the OAuth flow in a real browser to obtain a live session token, then export that token for use in your requests.
+
+**Step 1 — Sign in via the browser**
+
+Navigate to your Deploy Your App dashboard and complete the GitHub OAuth login.
+
+**Step 2 — Copy the session token**
+
+Open your browser's DevTools → **Application** → **Cookies** and locate the cookie named `better-auth.session_token`. Copy its value.
+
+**Step 3 — Pass the cookie with your requests**
+
+```bash
+# List your projects using a session cookie
+curl https://your-domain.com/api/v1/projects \
+  -b 'better-auth.session_token=YOUR_SESSION_TOKEN'
+```
+
+```bash
+# Get a specific project by ID
+curl https://your-domain.com/api/v1/projects/PROJECT_ID \
+  -b 'better-auth.session_token=YOUR_SESSION_TOKEN'
+```
+
+```bash
+# Trigger a manual deployment
+curl -X POST https://your-domain.com/api/v1/projects/PROJECT_ID/deploy \
+  -b 'better-auth.session_token=YOUR_SESSION_TOKEN'
+```
+
+## Auth Session Endpoint
+
+You can verify your current session at any time by calling the `better-auth` session endpoint, which is proxied through the Next.js route handler:
+
+```bash
+GET /api/auth/session
+```
+
+```bash
+curl https://your-domain.com/api/auth/session \
+  -b 'better-auth.session_token=YOUR_SESSION_TOKEN'
+```
+
+A successful response returns the authenticated user and session objects:
+
+```json
+{
+  "user": {
+    "id": "...",
+    "name": "Your Name",
+    "email": "you@example.com",
+    "image": "https://avatars.githubusercontent.com/..."
+  },
+  "session": {
+    "id": "...",
+    "userId": "...",
+    "expiresAt": "2025-12-31T00:00:00.000Z"
+  }
+}
+```
+
+If no valid session exists the response body is `null`.
+
+<Warning>
+  Deploy Your App does **not** support API keys or Bearer token authentication. The only supported mechanism is the HTTP-only session cookie issued after a successful GitHub OAuth login. For programmatic access, copy the `better-auth.session_token` cookie value from an active browser session and pass it with `-b` in `curl` or via the `Cookie` header in your HTTP client.
+</Warning>
+
+## GitHub OAuth App Setup
+
+To enable authentication on a self-hosted instance, you must register a GitHub OAuth App and supply its credentials as environment variables.
+
+<Note>
+  See the [Self-Hosting guide](/self-hosting) for the full list of required environment variables, including `BETTER_AUTH_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `NEXT_PUBLIC_APP_URL`.
+</Note>
+
+**Registering the OAuth App on GitHub:**
+
+1. Go to **GitHub → Settings → Developer settings → OAuth Apps → New OAuth App**.
+2. Fill in the application name (e.g. `Deploy Your App`).
+3. Set **Homepage URL** to your instance URL:
+   ```
+   https://your-domain.com
+   ```
+4. Set **Authorization callback URL** to the `better-auth` callback path:
+   ```
+   https://your-domain.com/api/auth/callback/github
+   ```
+5. Click **Register application** and copy the **Client ID** and **Client Secret** into your environment:
+
+```bash
+GITHUB_CLIENT_ID=your_client_id
+GITHUB_CLIENT_SECRET=your_client_secret
+```
+
+The GitHub OAuth scopes requested at login are `read:user`, `user:email`, `repo`, and `write:repo_hook`. The `repo` and `write:repo_hook` scopes are required so Deploy Your App can list repositories and automatically register push-event webhooks when you import a project.

@@ -1,0 +1,67 @@
+---
+title: "DELETE /api/v1/projects/:id — Remove a Project"
+sidebarTitle: "Delete Project"
+description: "Permanently delete a project and all of its associated deployments and environment variables. This action cannot be undone."
+---
+
+The Delete Project endpoint permanently removes a project from the platform along with every record linked to it. Before deletion, the endpoint verifies that the project belongs to the authenticated user to prevent accidental or malicious removal of another user's data. Once the project is deleted, the operation cannot be reversed.
+
+**`DELETE /api/v1/projects/:id`**
+
+## Authentication
+
+<Note>
+  This endpoint requires an active session. Include your session cookie with every request. See [Authentication](/api-reference/authentication) for details on obtaining a session token.
+</Note>
+
+<Warning>
+  **Deletion is permanent and cascades.** Deleting a project will also permanently remove all of its deployment records (including logs and build history) and all stored environment variables. There is no soft-delete or recovery mechanism. Make sure to back up any environment variable values you need before proceeding.
+</Warning>
+
+## Request
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  The unique project ID (cuid) of the project to delete.
+</ParamField>
+
+## Response
+
+A successful `200 OK` response returns a simple confirmation message:
+
+```json
+{
+  "message": "Project deleted successfully"
+}
+```
+
+### Response Fields
+
+<ResponseField name="message" type="string">
+  Confirmation message — `"Project deleted successfully"`.
+</ResponseField>
+
+## Example
+
+```bash
+curl -X DELETE https://your-domain.com/api/v1/projects/clx4z2k0e0000abc123def456 \
+  -H 'Content-Type: application/json' \
+  -b 'better-auth.session_token=YOUR_SESSION_TOKEN'
+```
+
+**Example response:**
+
+```json
+{
+  "message": "Project deleted successfully"
+}
+```
+
+## Error Responses
+
+| Status | Error Message | Description |
+|--------|--------------|-------------|
+| `401` | `"Unauthorized"` | No valid session cookie was provided. |
+| `404` | `"Project not found or unauthorized"` | No project with the given ID exists, or it belongs to another user. |
+| `500` | `"Failed to delete project"` | An unexpected server-side error occurred. |

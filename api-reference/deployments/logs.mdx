@@ -1,0 +1,137 @@
+---
+title: "GET /api/v1/deployments/:id/logs — Fetch Deployment Logs"
+sidebarTitle: "Deployment Logs"
+description: "Stream real-time deployment log output via Server-Sent Events using a Redis pub/sub channel scoped to a single deployment ID."
+---
+
+The Deployment Logs endpoint opens a **Server-Sent Events (SSE)** stream that delivers log lines in real time as your deployment progresses. Under the hood, the API subscribes to a Redis channel keyed to the deployment ID (`logs:<id>`). As the build worker publishes messages — covering everything from repository cloning through Docker build output to container startup — they are forwarded to the browser or client instantly, with no polling required.
+
+## `GET /api/v1/deployments/:id/logs`
+
+<Note>
+  Log streaming connects to the Redis pub/sub bus and does **not** require
+  session authentication on the route itself — the connection is scoped to the
+  deployment ID in the URL. Treat deployment IDs as secret tokens and avoid
+  exposing them publicly. For general authentication details, see the
+  [Authentication](/api-reference/authentication) reference.
+</Note>
+
+---
+
+## Request
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  The CUID of the deployment whose logs you want to stream (e.g.,
+  `clxyz123abc456def`). Obtain this from the
+  [List Deployments](/api-reference/deployments/list) or
+  [Get Deployment](/api-reference/deployments/get) endpoints.
+</ParamField>
+
+---
+
+## Response
+
+The endpoint responds immediately with HTTP **200** and keeps the connection open as a Server-Sent Events stream.
+
+| Header | Value |
+|--------|-------|
+| `Content-Type` | `text/event-stream` |
+| `Cache-Control` | `no-cache, no-transform` |
+| `Connection` | `keep-alive` |
+
+Each event is a JSON-encoded object on a `data:` line:
+
+```
+data: {"text":"[SYSTEM] Cloning repository acme-org/my-app..."}
+
+data: {"text":"Step 1/8 : FROM node:20-alpine"}
+
+data: {"text":"[SYSTEM] Container started on port 3001"}
+```
+
+The stream stays open until:
+- The deployment reaches a terminal state (`SUCCESS` or `FAILED`) and the worker closes the Redis channel.
+- The client closes the connection (e.g., navigates away or calls `EventSource.close()`).
+
+<Tip>
+  Log lines prefixed with `[SYSTEM]` are emitted by the Deploy Your App
+  platform itself and mark key lifecycle transitions — cloning, framework
+  detection, port allocation, container startup, and so on. Lines **without**
+  the prefix are raw output from Docker's build process (Dockerfile steps,
+  `npm install` output, compiler warnings, etc.). Filtering on this prefix is
+  an easy way to build a high-level progress indicator separate from verbose
+  build noise.
+</Tip>
+
+---
+
+## Example
+
+### Using `curl`
+
+```bash
+curl -N -X GET https://your-domain.com/api/v1/deployments/clxyz123abc456def/logs \
+  --header "Accept: text/event-stream"
+```
+
+The `-N` flag disables output buffering so events are printed as they arrive.
+
+### Using the browser `EventSource` API
+
+```javascript
+const deploymentId = "clxyz123abc456def";
+const source = new EventSource(`/api/v1/deployments/${deploymentId}/logs`);
+
+source.onmessage = (event) => {
+  const { text } = JSON.parse(event.data);
+
+  if (text.startsWith("[SYSTEM]")) {
+    console.info("Platform event:", text);
+  } else {
+    console.log("Build output:", text);
+  }
+};
+
+source.onerror = () => {
+  // The stream closed — deployment has completed or connection was lost.
+  source.close();
+};
+```
+
+**Example stream output:**
+
+```
+data: {"text":"[SYSTEM] Cloning repository acme-org/my-app (branch: main)..."}
+
+data: {"text":"[SYSTEM] Detecting framework..."}
+
+data: {"text":"[SYSTEM] Detected: Next.js"}
+
+data: {"text":"[SYSTEM] Allocating port..."}
+
+data: {"text":"Step 1/8 : FROM node:20-alpine"}
+
+data: {"text":"Step 2/8 : WORKDIR /app"}
+
+data: {"text":"Step 3/8 : COPY package*.json ./"}
+
+data: {"text":"Step 4/8 : RUN npm ci"}
+
+data: {"text":"[SYSTEM] Build completed. Starting container..."}
+
+data: {"text":"[SYSTEM] Deployment live at https://my-app.your-domain.com"}
+```
+
+---
+
+## Error Responses
+
+Because the endpoint upgrades to an SSE stream, most transport-level errors manifest as a closed connection rather than a JSON error body. The following conditions cause the stream never to open:
+
+| Status | Condition |
+|--------|-----------|
+| `500` | Redis connection failed or another server-side error prevented the subscription from being established. |
+
+If a deployment ID does not correspond to any active Redis channel (e.g., the deployment has already completed and the channel has been closed), the stream will open successfully but emit no further events. In that case, retrieve the stored logs from the [Get Deployment](/api-reference/deployments/get) endpoint and read the `logs` field directly.

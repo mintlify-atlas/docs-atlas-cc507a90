@@ -1,47 +1,95 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with Deploy Your App in 5 Minutes"
+sidebarTitle: "Quickstart"
+description: "Import a GitHub repository, configure your build settings, and get your first Next.js, Vite, or Node.js application live in under 5 minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
+This guide walks you through importing a GitHub repository and getting your first application live on Deploy Your App. The platform handles framework detection, Docker image builds, and subdomain routing automatically — you just point it at a repo and click deploy.
 
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+<Note>
+  **Prerequisites:** You need a running Deploy Your App instance before following this guide. If you haven't set one up yet, see the [Self-Hosting](/self-hosting) guide. You'll also need a GitHub account with at least one repository you want to deploy.
+</Note>
 
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+## Deploy Your First App
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Sign In with GitHub">
+    Open the Deploy Your App web dashboard in your browser and click **Sign in with GitHub**. You will be redirected to GitHub to authorize the OAuth application.
 
-    ```bash
-    npm install your-package
+    The platform requests the following GitHub scopes to manage your repositories and webhooks:
+
     ```
+    read:user   user:email   repo   write:repo_hook
+    ```
+
+    After authorizing, you will be redirected to your dashboard where your GitHub repositories are listed.
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
 
-    ```bash
-    your-cli init
-    ```
+  <Step title="Import a Repository">
+    On the dashboard, browse the list of your GitHub repositories. Click **Import** next to the repository you want to deploy.
+
+    The platform reads your repository metadata — including the default branch — and opens the project configuration screen.
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
 
-    ```bash
-    your-cli start
+  <Step title="Configure Build Settings">
+    Review and optionally customize your project settings. All fields are auto-detected from your repository, so this step is optional for most projects.
+
+    | Field | Description | Example |
+    |---|---|---|
+    | **Name** | Unique project name used in your subdomain | `my-portfolio` |
+    | **Branch** | Branch to deploy from | `main` |
+    | **Root Directory** | Monorepo sub-path to your app | `apps/web` |
+    | **Build Command** | Override the detected build command | `bun run build` |
+    | **Start Command** | Override the container start command | `bun run start` |
+    | **Environment Variables** | Key/value pairs encrypted at rest | `API_URL=https://...` |
+
+    <Tip>
+      Add your environment variables **before** clicking Deploy. Variables are encrypted with your `MASTER_ENCRYPTION_KEY` and injected into the build and runtime environment. Re-deploying after adding variables is straightforward, but doing it upfront saves a round-trip.
+    </Tip>
+  </Step>
+
+  <Step title="Click Deploy">
+    Click the **Deploy** button. The platform immediately queues a deployment job that executes the following steps in order:
+
+    1. **Clone** — The builder service clones your repository at the specified branch using your GitHub OAuth token.
+    2. **Detect** — The framework is identified from your project files (`next.config.*`, `vite.config.*`, `package.json`, etc.).
+    3. **Build** — A Docker image is built using the appropriate Dockerfile for your stack (Next.js, Vite, Node.js, or Bun).
+    4. **Deploy** — Static apps (Vite, Next.js static export) have their output uploaded to Cloudflare R2. Dynamic apps (Next.js SSR, Node.js) are started as isolated Docker containers.
+    5. **Route** — The proxy service is updated to route your new subdomain to the running container or R2 bucket.
+
+    You can watch every step in real time on the deployment log panel.
+  </Step>
+
+  <Step title="Your App Is Live">
+    Once the deployment completes, your application is accessible at an auto-generated subdomain based on your project name:
+
     ```
+    https://<project-name>-<short-id>.yourdomain.com
+    ```
+
+    For example, a project named `my-portfolio` might be available at:
+
+    ```
+    https://my-portfolio-a1b2c3.yourdomain.com
+    ```
+
+    The subdomain is created automatically by the dynamic reverse proxy and is ready immediately after deployment — no DNS changes required on your end.
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## What's Next?
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Import a Project" icon="github" href="/guides/import-project">
+    Learn the full project import flow, including advanced repository settings and GitHub App configuration.
+  </Card>
+  <Card title="Environment Variables" icon="lock" href="/guides/environment-variables">
+    Manage encrypted secrets, add variables to running projects, and understand how they are injected at build and runtime.
+  </Card>
+  <Card title="Custom Domains" icon="globe" href="/guides/custom-domains">
+    Map your own domain name to a deployed project and configure automatic TLS certificates via Caddy.
+  </Card>
+  <Card title="Build System" icon="hammer" href="/concepts/build-system">
+    Understand how the platform detects frameworks and selects the right Dockerfile for each deployment.
+  </Card>
+</CardGroup>

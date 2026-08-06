@@ -1,0 +1,81 @@
+---
+title: "Server Environment Variables Reference for Self-Hosting"
+sidebarTitle: "Env Reference"
+description: "Complete reference of all required and optional environment variables for every Deploy Your App service, grouped by service for self-hosted deployments."
+---
+
+Running Deploy Your App on your own infrastructure requires configuring environment variables across several independent services: the Next.js web app, the Express API server, the BullMQ builder, the worker, and the notification microservice. This page is the authoritative reference for every variable each service reads, with its type, default value, and purpose.
+
+## Web App (`apps/web`)
+
+The web app is a Next.js application that serves the dashboard and exposes the REST API consumed by the other services.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DATABASE_URL` | ✅ Yes | — | PostgreSQL connection string. Example: `postgresql://postgres:postgres@localhost:5432/mydb` |
+| `BETTER_AUTH_SECRET` | ✅ Yes | — | Secret key used by better-auth to sign and verify session tokens. Must be at least 32 characters |
+| `BETTER_AUTH_URL` | ✅ Yes | — | Full public URL of the web app. Example: `https://app.yourdomain.com` |
+| `GITHUB_CLIENT_ID` | ✅ Yes | — | Client ID of your GitHub OAuth App |
+| `GITHUB_CLIENT_SECRET` | ✅ Yes | — | Client secret of your GitHub OAuth App |
+| `MASTER_ENCRYPTION_KEY` | ✅ Yes | — | AES encryption key used to encrypt project environment variables at rest. Must be a 64-character hex string (32 bytes). **Must match the value set in `apps/api`** |
+| `NEXT_PUBLIC_BASE_DOMAIN` | ✅ Yes | — | Base domain used when generating subdomains for deployed apps. Example: `yourdomain.com` |
+
+## API Service (`apps/api`)
+
+The API service is a lightweight Express server that receives GitHub webhook events and enqueues deployment jobs into BullMQ.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | No | `4000` | Port the API server listens on |
+| `DATABASE_URL` | ✅ Yes | — | PostgreSQL connection string, same database as the web app |
+| `REDIS_HOST` | No | `localhost` | Hostname of the Redis instance used by BullMQ |
+| `REDIS_PORT` | No | `6379` | Port of the Redis instance |
+| `GITHUB_WEBHOOK_SECRET` | No | `development-secret` | HMAC secret used to verify the `X-Hub-Signature-256` header on incoming GitHub webhook payloads. Set this to a strong random string in production |
+| `MASTER_ENCRYPTION_KEY` | ✅ Yes | — | Must match the value set in `apps/web`. Used to decrypt project environment variables before passing them to the builder |
+
+## Builder (`apps/builder`)
+
+The builder is a BullMQ worker that consumes the `execution-queue`, clones repositories, builds Docker images, and either runs containers or uploads static output to Cloudflare R2.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `REDIS_HOST` | No | `localhost` | Hostname of the Redis instance |
+| `REDIS_PORT` | No | `6379` | Port of the Redis instance |
+| `R2_ENDPOINT` | ✅ For static sites | — | Cloudflare R2 S3-compatible endpoint URL. Example: `https://<account-id>.r2.cloudflarestorage.com` |
+| `R2_ACCESS_KEY_ID` | ✅ For static sites | — | R2 access key ID |
+| `R2_SECRET_ACCESS_KEY` | ✅ For static sites | — | R2 secret access key |
+| `R2_BUCKET_NAME` | ✅ For static sites | — | Name of the R2 bucket where static build output is uploaded |
+| `BASE_DOMAIN` | ✅ Yes | `localhost` | Base domain for subdomain generation after deployment. Should match `NEXT_PUBLIC_BASE_DOMAIN` in the web app |
+| `WORKER_CONCURRENCY` | No | `1` | Maximum number of build jobs to process in parallel |
+
+## Worker (`apps/worker`)
+
+The worker is a separate BullMQ consumer process. It shares the same Redis instance as the builder and API service.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `REDIS_HOST` | No | `localhost` | Hostname of the Redis instance |
+| `REDIS_PORT` | No | `6379` | Port of the Redis instance |
+
+## Notification Service (`apps/nortification`)
+
+The notification service listens on the `notification-queue` BullMQ queue and dispatches messages across Email, Slack, Discord, and WhatsApp. All variables for this service are optional — channels are skipped gracefully when their credentials are absent.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `REDIS_HOST` | No | `localhost` | Hostname of the Redis instance |
+| `REDIS_PORT` | No | `6379` | Port of the Redis instance |
+| `RESEND_API_KEY` | No | — | API key for the Resend email service. Example: `re_...` |
+| `SLACK_WEBHOOK_URL` | No | — | Slack incoming webhook URL. Example: `https://hooks.slack.com/services/...` |
+| `DISCORD_WEBHOOK_URL` | No | — | Discord webhook URL. Example: `https://discord.com/api/webhooks/...` |
+| `TWILIO_ACCOUNT_SID` | No | — | Twilio Account SID for WhatsApp messaging |
+| `TWILIO_AUTH_TOKEN` | No | — | Twilio authentication token |
+| `TWILIO_WHATSAPP_FROM` | No | — | WhatsApp-enabled sender number in Twilio format. Example: `whatsapp:+14155238886` |
+
+<Note>
+  All notification service environment variables are optional. If a channel's required credentials are not set, the service logs a warning and silently skips that channel without crashing. You only need to configure the channels you intend to use.
+</Note>
+
+<Warning>
+  **`MASTER_ENCRYPTION_KEY` must be identical in `apps/web` and `apps/api`.**  This key is used to AES-encrypt project environment variables when they are saved (web app) and to decrypt them just before they are injected into a deployment build (API service). If the values differ — or if the key is rotated after environment variables have already been stored — decryption will fail silently and your deployed containers will start with incorrect or empty environment variables.
+</Warning>

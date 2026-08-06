@@ -1,0 +1,187 @@
+---
+title: "PATCH /api/v1/projects/:id — Update Project Settings"
+sidebarTitle: "Update Project"
+description: "Partially update a project's name, build configuration, default branch, or custom domain. All body fields are optional; only provided fields are changed."
+---
+
+The Update Project endpoint allows you to modify one or more settings on an existing project without touching unspecified fields. You can rename the project, change build and start commands, adjust the root directory, switch the default branch, or attach and remove a custom domain — all in a single request by including only the fields you want to change.
+
+**`PATCH /api/v1/projects/:id`**
+
+## Authentication
+
+<Note>
+  This endpoint requires an active session. Include your session cookie with every request. See [Authentication](/api-reference/authentication) for details on obtaining a session token.
+</Note>
+
+## Request
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  The unique project ID (cuid) of the project to update.
+</ParamField>
+
+### Body Parameters
+
+All body fields are optional. Include only the fields you wish to change.
+
+<ParamField body="name" type="string">
+  New display name for the project.
+</ParamField>
+
+<ParamField body="rootDirectory" type="string">
+  Path to the application root within the repository, relative to the repo root (e.g. `"apps/web"`). Omit or set to `null` to use the repository root.
+</ParamField>
+
+<ParamField body="buildCommand" type="string">
+  Custom build command that overrides auto-detection (e.g. `"npm run build:prod"`). Set to `null` to revert to auto-detection.
+</ParamField>
+
+<ParamField body="startCommand" type="string">
+  Custom start command that overrides auto-detection (e.g. `"node dist/server.js"`). Set to `null` to revert to auto-detection.
+</ParamField>
+
+<ParamField body="defaultBranch" type="string">
+  Git branch to use for future production deployments (e.g. `"develop"`).
+</ParamField>
+
+<ParamField body="customDomain" type="string | null">
+  A custom hostname to attach to this project (e.g. `"app.example.com"`). Pass `null` or an empty string to remove an existing custom domain.
+</ParamField>
+
+<Note>
+  **Domain validation rules:** The value must be a valid hostname — no wildcards (`*`), no path segments (`/`), and no protocol prefix (`https://`). For example, `"app.example.com"` is valid while `"*.example.com"` or `"example.com/app"` are not. The domain is also normalised to lowercase and must be unique across all projects on the platform. Setting a new custom domain resets `customDomainVerified` to `false` until DNS propagation is confirmed.
+</Note>
+
+## Response
+
+A successful `200 OK` response returns the fully updated project object:
+
+```json
+{
+  "message": "Project updated successfully",
+  "data": {
+    "project": Project
+  }
+}
+```
+
+### Response Fields
+
+<ResponseField name="message" type="string">
+  Human-readable status message — `"Project updated successfully"`.
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Wrapper object containing the updated project.
+
+  <Expandable title="data">
+    <ResponseField name="project" type="object">
+      The complete, updated project record reflecting all applied changes.
+
+      <Expandable title="Project">
+        <ResponseField name="id" type="string">
+          Unique project identifier (cuid).
+        </ResponseField>
+
+        <ResponseField name="userId" type="string">
+          ID of the owning user.
+        </ResponseField>
+
+        <ResponseField name="name" type="string">
+          Display name for the project.
+        </ResponseField>
+
+        <ResponseField name="repositoryFullName" type="string">
+          Full GitHub repository path, e.g. `"owner/repo"`.
+        </ResponseField>
+
+        <ResponseField name="defaultBranch" type="string">
+          Branch used for production deployments.
+        </ResponseField>
+
+        <ResponseField name="buildCommand" type="string | null">
+          Custom build command, or `null` if auto-detected.
+        </ResponseField>
+
+        <ResponseField name="startCommand" type="string | null">
+          Custom start command, or `null` if auto-detected.
+        </ResponseField>
+
+        <ResponseField name="rootDirectory" type="string | null">
+          Application root path within the repository, or `null`.
+        </ResponseField>
+
+        <ResponseField name="deploymentUrl" type="string | null">
+          Auto-generated production URL. Unchanged by this endpoint.
+        </ResponseField>
+
+        <ResponseField name="customDomain" type="string | null">
+          Updated custom hostname, or `null` if removed.
+        </ResponseField>
+
+        <ResponseField name="customDomainVerified" type="boolean">
+          Resets to `false` whenever `customDomain` is changed.
+        </ResponseField>
+
+        <ResponseField name="createdAt" type="string">
+          ISO 8601 creation timestamp. Unchanged by this endpoint.
+        </ResponseField>
+
+        <ResponseField name="updatedAt" type="string">
+          ISO 8601 timestamp reflecting this update.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example
+
+```bash
+curl -X PATCH https://your-domain.com/api/v1/projects/clx4z2k0e0000abc123def456 \
+  -H 'Content-Type: application/json' \
+  -b 'better-auth.session_token=YOUR_SESSION_TOKEN' \
+  -d '{
+    "name": "My Renamed App",
+    "defaultBranch": "production",
+    "buildCommand": "npm run build:prod",
+    "customDomain": "app.example.com"
+  }'
+```
+
+**Example response:**
+
+```json
+{
+  "message": "Project updated successfully",
+  "data": {
+    "project": {
+      "id": "clx4z2k0e0000abc123def456",
+      "userId": "user_01hxyz",
+      "name": "My Renamed App",
+      "repositoryFullName": "acme/my-nextjs-app",
+      "defaultBranch": "production",
+      "buildCommand": "npm run build:prod",
+      "startCommand": null,
+      "rootDirectory": null,
+      "deploymentUrl": "https://my-nextjs-app.your-domain.com",
+      "customDomain": "app.example.com",
+      "customDomainVerified": false,
+      "createdAt": "2024-06-01T12:00:00.000Z",
+      "updatedAt": "2024-06-11T14:22:00.000Z"
+    }
+  }
+}
+```
+
+## Error Responses
+
+| Status | Error Message | Description |
+|--------|--------------|-------------|
+| `400` | `"Invalid domain format. Please provide a valid hostname (e.g., app.example.com)."` | The supplied `customDomain` value failed hostname validation. |
+| `400` | `"Domain is already in use by another project."` | The normalised domain is already attached to a different project. |
+| `401` | `"Unauthorized"` | No valid session cookie was provided. |
+| `404` | `"Project not found"` | No project with the given ID exists, or it belongs to another user. |
+| `500` | `"Failed to update project"` | An unexpected server-side error occurred. |

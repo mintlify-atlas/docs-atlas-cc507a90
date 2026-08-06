@@ -1,0 +1,112 @@
+---
+title: "Customize Build and Start Commands for Your Project"
+sidebarTitle: "Build Commands"
+description: "Learn how to override auto-detected build and start commands, set a root directory for monorepos, and control how Docker builds your app."
+---
+
+Deploy Your App automatically detects your framework, package manager, and build scripts by inspecting your repository's `package.json` and lockfiles — no manual configuration needed for most projects. However, when you need a custom build step, a non-standard server entry point, or you are working inside a monorepo, you can override these defaults through the project settings API or the dashboard.
+
+## Project Settings Fields
+
+The following fields are accepted by `PATCH /api/v1/projects/:id` and control how deployments are built and started.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `string` | Display name for the project |
+| `defaultBranch` | `string` | The branch to deploy on push. Defaults to `main` |
+| `buildCommand` | `string \| null` | Override the build script (e.g. `npm run build:prod`). When `null`, the auto-detected default is used |
+| `startCommand` | `string \| null` | Override the container start command (e.g. `node dist/server.js`). When `null`, the framework default is used |
+| `rootDirectory` | `string \| null` | Subdirectory containing `package.json`, relative to the repository root (e.g. `apps/web`). Required for monorepos |
+
+## Auto-Detection Defaults
+
+When no override is provided, the builder detects the framework by inspecting `dependencies` and `devDependencies` in `package.json` and applies the following defaults:
+
+| Framework | Default Build Command | Default Start Command |
+|-----------|-----------------------|-----------------------|
+| Next.js | `npm run build` (or `bun run build` / `pnpm run build` / `yarn build`) | `node server.js` (via `next start`) |
+| Node.js | `npm run build --if-present` | `npm start` (or `bun run start` for bun projects) |
+| Vite | `npm run build` (or package-manager variant) | N/A — output is extracted as static files |
+
+For Node.js projects that have no `start` script but do have an `index.js` at the root, the builder automatically falls back to `node index.js` as the suggested start command.
+
+## Package Manager Detection
+
+The builder reads lockfiles in your repository (or `rootDirectory`) and selects the package manager accordingly. When multiple lockfiles are present a warning is logged and the highest-priority match wins.
+
+| Lockfile | Package Manager | Install Command | Build Command |
+|----------|-----------------|-----------------|---------------|
+| `pnpm-lock.yaml` | pnpm | `pnpm install --frozen-lockfile` | `pnpm run build` |
+| `yarn.lock` | yarn | `yarn install --frozen-lockfile` | `yarn build` |
+| `bun.lock` / `bun.lockb` | bun | `bun install --frozen-lockfile` | `bun run build` |
+| `package-lock.json` | npm | `npm ci` | `npm run build` |
+| _(none found)_ | npm | `npm install` | `npm run build` |
+
+## Docker Build Arguments
+
+Overrides are passed into Dockerfiles as build arguments. You can inspect the templates in `infra/docker/` to understand exactly how each argument is consumed.
+
+| Build Arg | Description | Example |
+|-----------|-------------|---------|
+| `BUILD_COMMAND` | Overrides the build script executed during the Docker build stage | `npm run build:production` |
+| `START_COMMAND` | Overrides the `CMD` used to start the container | `node dist/server.js` |
+| `ROOT_DIR` | Sets the working directory inside the Docker build context | `apps/api` |
+
+These args are injected automatically by the builder based on your project settings — you do not pass them directly unless you are building images manually.
+
+## Updating Project Settings via API
+
+```bash
+curl -X PATCH https://your-domain.com/api/v1/projects/PROJECT_ID \
+  -H 'Content-Type: application/json' \
+  -b 'session=YOUR_SESSION_COOKIE' \
+  -d '{
+    "buildCommand": "npm run build:prod",
+    "startCommand": "node dist/server.js",
+    "rootDirectory": "apps/api"
+  }'
+```
+
+A successful response returns the updated project object:
+
+```json
+{
+  "message": "Project updated successfully",
+  "data": {
+    "project": {
+      "id": "PROJECT_ID",
+      "buildCommand": "npm run build:prod",
+      "startCommand": "node dist/server.js",
+      "rootDirectory": "apps/api"
+    }
+  }
+}
+```
+
+To clear an override and revert to auto-detection, send `null` for the field:
+
+```bash
+curl -X PATCH https://your-domain.com/api/v1/projects/PROJECT_ID \
+  -H 'Content-Type: application/json' \
+  -b 'session=YOUR_SESSION_COOKIE' \
+  -d '{
+    "buildCommand": null,
+    "startCommand": null
+  }'
+```
+
+## Monorepo Setup
+
+<Tip>
+  When your repository contains multiple applications, set `rootDirectory` to the subdirectory that contains the `package.json` for the app you want to deploy — for example `apps/web` or `packages/server`. The builder copies the entire repository into the Docker build context and then switches into that subdirectory, so workspace-level lockfiles and shared packages remain accessible.
+</Tip>
+
+<Warning>
+  A `package.json` file must exist at the resolved `rootDirectory` path. If it is missing, the build fails immediately with a descriptive error:
+
+  ```
+  CRITICAL: package.json missing at /path/to/apps/web. Found files: ...
+  ```
+
+  Double-check that `rootDirectory` matches the exact path relative to your repository root and that the directory is committed to your branch.
+</Warning>

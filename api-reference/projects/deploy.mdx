@@ -1,0 +1,166 @@
+---
+title: "POST /api/v1/projects/:id/deploy — Trigger a New Deployment"
+sidebarTitle: "Trigger Deploy"
+description: "Manually queue a new production deployment for an existing project using its configured default branch and current environment variables."
+---
+
+The Trigger Deploy endpoint lets you manually kick off a new deployment for any existing project without pushing a commit to GitHub. The platform creates a fresh deployment record, decrypts the project's stored environment variables, and adds a build job to the queue using the project's `defaultBranch` and current build configuration. This is useful for re-deploying after updating environment variables, recovering from a failed deployment, or deploying on demand without a code change.
+
+**`POST /api/v1/projects/:id/deploy`**
+
+## Authentication
+
+<Note>
+  This endpoint requires an active session and a connected GitHub account. Your GitHub OAuth access token is used to clone the repository during the build. See [Authentication](/api-reference/authentication) for details on obtaining a session token.
+</Note>
+
+## Request
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  The unique project ID (cuid) of the project to deploy.
+</ParamField>
+
+This endpoint requires no request body.
+
+<Note>
+  The deployment always uses the project's configured `defaultBranch`. To deploy a different branch, first update the project's `defaultBranch` via the [Update Project](/api-reference/projects/update) endpoint, then trigger a new deployment.
+</Note>
+
+## Response
+
+A successful `201 Created` response returns the newly queued deployment record:
+
+```json
+{
+  "message": "Deployment queued successfully",
+  "data": {
+    "deployment": Deployment
+  }
+}
+```
+
+### Response Fields
+
+<ResponseField name="message" type="string">
+  Human-readable status message — `"Deployment queued successfully"`.
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Wrapper object containing the new deployment record.
+
+  <Expandable title="data">
+    <ResponseField name="deployment" type="object">
+      The freshly created deployment record in `PENDING` state.
+
+      <Expandable title="Deployment">
+        <ResponseField name="id" type="string">
+          Unique deployment identifier (cuid).
+        </ResponseField>
+
+        <ResponseField name="projectId" type="string">
+          ID of the parent project.
+        </ResponseField>
+
+        <ResponseField name="branch" type="string">
+          The project's `defaultBranch` at the time the deployment was triggered.
+        </ResponseField>
+
+        <ResponseField name="commitHash" type="string | null">
+          `null` initially; populated once the repository clone step resolves the HEAD commit.
+        </ResponseField>
+
+        <ResponseField name="status" type="DeploymentStatus">
+          Always `PENDING` on creation. Progresses through `CLONING` → `DETECTING` → `ALLOCATING` → `BUILDING` → `DEPLOYING` → `SUCCESS` or `FAILED`.
+        </ResponseField>
+
+        <ResponseField name="url" type="string | null">
+          `null` until the deployment reaches `SUCCESS` and a container URL is assigned.
+        </ResponseField>
+
+        <ResponseField name="port" type="integer | null">
+          `null` until a container port is allocated during the `ALLOCATING` phase.
+        </ResponseField>
+
+        <ResponseField name="logs" type="string | null">
+          `null` initially; accumulates build and runtime log output as the deployment progresses.
+        </ResponseField>
+
+        <ResponseField name="error" type="string | null">
+          `null` unless the deployment reaches the `FAILED` state.
+        </ResponseField>
+
+        <ResponseField name="createdAt" type="string">
+          ISO 8601 timestamp when this deployment record was created.
+        </ResponseField>
+
+        <ResponseField name="updatedAt" type="string">
+          ISO 8601 timestamp of the most recent status update.
+        </ResponseField>
+
+        <ResponseField name="completedAt" type="string | null">
+          `null` while the deployment is in-progress; set to an ISO 8601 timestamp when a terminal state (`SUCCESS` or `FAILED`) is reached.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Deployment Lifecycle
+
+After this endpoint returns `201`, the deployment progresses asynchronously through the following stages:
+
+| Status | Description |
+|--------|-------------|
+| `PENDING` | Queued and waiting for a worker to pick it up. |
+| `CLONING` | Cloning the repository from GitHub. |
+| `DETECTING` | Auto-detecting the framework (Next.js, Vite, Node.js, etc.). |
+| `ALLOCATING` | Reserving a container port for the application. |
+| `BUILDING` | Running the build command inside a Docker container. |
+| `DEPLOYING` | Starting the container and routing traffic. |
+| `SUCCESS` | Application is live and accessible. |
+| `FAILED` | Build or start encountered an unrecoverable error. |
+
+Poll the [Get Project](/api-reference/projects/get) endpoint to track the deployment's `status`, `logs`, and `url` fields as it progresses.
+
+## Example
+
+```bash
+curl -X POST https://your-domain.com/api/v1/projects/clx4z2k0e0000abc123def456/deploy \
+  -H 'Content-Type: application/json' \
+  -b 'better-auth.session_token=YOUR_SESSION_TOKEN'
+```
+
+**Example response (`201 Created`):**
+
+```json
+{
+  "message": "Deployment queued successfully",
+  "data": {
+    "deployment": {
+      "id": "clx6b4c2d0003uvw901jkl234",
+      "projectId": "clx4z2k0e0000abc123def456",
+      "branch": "main",
+      "commitHash": null,
+      "status": "PENDING",
+      "url": null,
+      "port": null,
+      "logs": null,
+      "error": null,
+      "createdAt": "2024-06-11T15:00:00.000Z",
+      "updatedAt": "2024-06-11T15:00:00.000Z",
+      "completedAt": null
+    }
+  }
+}
+```
+
+## Error Responses
+
+| Status | Error Message | Description |
+|--------|--------------|-------------|
+| `401` | `"Unauthorized"` | No valid session cookie was provided. |
+| `401` | `"No GitHub access token found"` | The authenticated user has not connected a GitHub account or the token has expired. |
+| `404` | `"Project not found or unauthorized"` | No project with the given ID exists, or it belongs to another user. |
+| `500` | `"Internal server error"` | An unexpected server-side error occurred, such as a queue connection failure. |
